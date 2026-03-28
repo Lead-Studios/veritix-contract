@@ -1,5 +1,5 @@
 use crate::balance::{receive_balance, spend_balance};
-use crate::storage_types::DataKey;
+use crate::storage_types::{increment_counter, DataKey};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 #[contracttype]
@@ -26,9 +26,7 @@ pub fn setup_recurring(
     payer.require_auth();
 
     // 2. Increment and get the new Recurring ID
-    let mut count: u32 = e.storage().instance().get(&DataKey::RecurringCount).unwrap_or(0);
-    count += 1;
-    e.storage().instance().set(&DataKey::RecurringCount, &count);
+    let count = increment_counter(e, &DataKey::RecurringCount);
 
     // 3. Store the recurring record
     let record = RecurringRecord {

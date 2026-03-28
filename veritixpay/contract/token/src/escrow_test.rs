@@ -3,6 +3,7 @@ use soroban_sdk::{testutils::Address as _, Address, Env};
 use crate::balance::read_balance;
 use crate::contract::VeritixToken;
 use crate::escrow::{create_escrow, get_escrow, refund_escrow, release_escrow};
+use crate::storage_types::{read_counter, DataKey};
 
 // Helper to create a fresh Env with mock auth enabled.
 fn setup_env() -> Env {
@@ -32,6 +33,26 @@ fn test_create_escrow_stores_record() {
         assert_eq!(record.amount, amount);
         assert!(!record.released);
         assert!(!record.refunded);
+    });
+}
+
+#[test]
+fn test_create_escrow_increments_counter() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let depositor = Address::generate(&e);
+    let beneficiary = Address::generate(&e);
+    let amount = 1_000i128;
+
+    e.as_contract(&contract_id, || {
+        crate::balance::receive_balance(&e, depositor.clone(), amount * 2);
+        create_escrow(&e, depositor.clone(), beneficiary.clone(), amount);
+    });
+
+    e.as_contract(&contract_id, || {
+        create_escrow(&e, depositor, beneficiary, amount);
+
+        assert_eq!(read_counter(&e, &DataKey::EscrowCount), 2);
     });
 }
 

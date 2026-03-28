@@ -1,5 +1,5 @@
 use crate::balance::{receive_balance, spend_balance};
-use crate::storage_types::DataKey;
+use crate::storage_types::{increment_counter, DataKey};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 #[contracttype]
@@ -23,13 +23,7 @@ pub fn create_escrow(e: &Env, depositor: Address, beneficiary: Address, amount: 
     receive_balance(e, e.current_contract_address(), amount);
 
     // Increment and persist the global escrow counter
-    let mut count: u32 = e
-        .storage()
-        .instance()
-        .get(&DataKey::EscrowCount)
-        .unwrap_or(0);
-    count += 1;
-    e.storage().instance().set(&DataKey::EscrowCount, &count);
+    let count = increment_counter(e, &DataKey::EscrowCount);
 
     // Persist the new escrow record
     let record = EscrowRecord {

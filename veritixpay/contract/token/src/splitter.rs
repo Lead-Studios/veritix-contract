@@ -1,5 +1,5 @@
 use crate::balance::{receive_balance, spend_balance};
-use crate::storage_types::DataKey;
+use crate::storage_types::{increment_counter, DataKey};
 use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 
 #[contracttype]
@@ -37,9 +37,7 @@ pub fn create_split(
     }
 
     // 2. Increment and get Split ID
-    let mut count: u32 = e.storage().instance().get(&DataKey::SplitCount).unwrap_or(0);
-    count += 1;
-    e.storage().instance().set(&DataKey::SplitCount, &count);
+    let count = increment_counter(e, &DataKey::SplitCount);
 
     // 3. Move funds from sender to contract
     // Note: Assuming contract address is e.current_contract_address()

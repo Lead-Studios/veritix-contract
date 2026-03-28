@@ -1,5 +1,5 @@
 use crate::escrow::{get_escrow, release_escrow, refund_escrow};
-use crate::storage_types::DataKey;
+use crate::storage_types::{increment_counter, DataKey};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 #[contracttype]
@@ -44,9 +44,7 @@ pub fn open_dispute(
     }
 
     // 4. Generate a new Dispute ID using the counter in storage
-    let mut count: u32 = e.storage().instance().get(&DataKey::DisputeCount).unwrap_or(0);
-    count += 1;
-    e.storage().instance().set(&DataKey::DisputeCount, &count);
+    let count = increment_counter(e, &DataKey::DisputeCount);
 
     // 5. Create and store the dispute record
     let record = DisputeRecord {
