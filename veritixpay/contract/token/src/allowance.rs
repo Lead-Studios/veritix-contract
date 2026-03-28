@@ -12,6 +12,8 @@ pub fn read_allowance(e: &Env, from: Address, spender: Address) -> AllowanceValu
         .persistent()
         .get::<DataKey, AllowanceValue>(&key)
     {
+        // Equal-to-current remains valid for the current ledger and expires
+        // once the sequence advances past the stored expiration ledger.
         if allowance.expiration_ledger < e.ledger().sequence() {
             AllowanceValue {
                 amount: 0,
@@ -58,6 +60,7 @@ pub fn write_allowance(
 pub fn spend_allowance(e: &Env, from: Address, spender: Address, amount: i128) {
     let allowance = read_allowance(e, from.clone(), spender.clone());
 
+    // Equal-to-current remains spendable during the current ledger only.
     if allowance.expiration_ledger < e.ledger().sequence() {
         panic!("allowance is expired");
     }

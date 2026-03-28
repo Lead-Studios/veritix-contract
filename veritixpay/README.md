@@ -54,6 +54,8 @@ Use the standard makefile commands to interact with the contract:
 ## Authorization Model
 Security is enforced natively using the Soroban SDK. Every state-changing function requires the caller to authorize the transaction, invoked via `address.require_auth()`. Administrative functions rely on `check_admin(&e)`, which verifies the caller against the stored `DataKey::Admin` address. To prevent state archiving, storage TTL (Time To Live) is bumped automatically during `read_balance` and `read_allowance` calls, ensuring active accounts remain on the ledger.
 
+Allowance expiration is ledger-based: an allowance with `expiration_ledger == current_ledger` remains valid for the current ledger and expires once the ledger sequence advances past that value.
+
 ## Adding a New Module
 1. Define any new data structures or `DataKey` variants in `storage_types.rs`.
 2. Create your logic file (e.g., `new_feature.rs`) and implement the core functions.
