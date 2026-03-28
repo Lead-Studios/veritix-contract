@@ -59,19 +59,25 @@ pub fn create_escrow(e: &Env, depositor: Address, beneficiary: Address, amount: 
 
 // Beneficiary claims the escrowed funds
 pub fn release_escrow(e: &Env, caller: Address, escrow_id: u32) {
+    if let Err(err) = try_release_escrow(e, caller, escrow_id) {
+        panic!("{}", err);
+    }
+}
+
+pub fn try_release_escrow(e: &Env, caller: Address, escrow_id: u32) -> Result<(), &'static str> {
     // Auth: caller must sign the transaction
     caller.require_auth();
 
-    let mut escrow = get_escrow(e, escrow_id);
+    let mut escrow = try_get_escrow(e, escrow_id)?;
 
     // Authorization: only the beneficiary can release
     if escrow.beneficiary != caller {
-        panic!("not beneficiary");
+        return Err("not beneficiary");
     }
 
     // State: cannot release twice or after refund
     if escrow.released || escrow.refunded {
-        panic!("already settled");
+        return Err("already settled");
     }
 
     // Mark as released and persist
@@ -93,23 +99,31 @@ pub fn release_escrow(e: &Env, caller: Address, escrow_id: u32) {
         ),
         escrow.beneficiary,
     );
+
+    Ok(())
 }
 
 // Depositor reclaims funds — only if not yet released
 pub fn refund_escrow(e: &Env, caller: Address, escrow_id: u32) {
+    if let Err(err) = try_refund_escrow(e, caller, escrow_id) {
+        panic!("{}", err);
+    }
+}
+
+pub fn try_refund_escrow(e: &Env, caller: Address, escrow_id: u32) -> Result<(), &'static str> {
     // Auth: caller must sign the transaction
     caller.require_auth();
 
-    let mut escrow = get_escrow(e, escrow_id);
+    let mut escrow = try_get_escrow(e, escrow_id)?;
 
     // Authorization: only the original depositor can refund
     if escrow.depositor != caller {
-        panic!("not depositor");
+        return Err("not depositor");
     }
 
     // State: cannot refund twice or after release
     if escrow.released || escrow.refunded {
-        panic!("already settled");
+        return Err("already settled");
     }
 
     // Mark as refunded and persist
@@ -131,12 +145,18 @@ pub fn refund_escrow(e: &Env, caller: Address, escrow_id: u32) {
         ),
         escrow.depositor,
     );
+
+    Ok(())
 }
 
 // Read an escrow record by ID
 pub fn get_escrow(e: &Env, escrow_id: u32) -> EscrowRecord {
+    try_get_escrow(e, escrow_id).unwrap_or_else(|err| panic!("{}", err))
+}
+
+pub fn try_get_escrow(e: &Env, escrow_id: u32) -> Result<EscrowRecord, &'static str> {
     e.storage()
         .persistent()
         .get(&DataKey::Escrow(escrow_id))
-        .expect("escrow not found")
+        .ok_or("escrow not found")
 }

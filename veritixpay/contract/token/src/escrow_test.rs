@@ -2,7 +2,10 @@ use soroban_sdk::{testutils::Address as _, Address, Env};
 
 use crate::balance::read_balance;
 use crate::contract::VeritixToken;
-use crate::escrow::{create_escrow, get_escrow, refund_escrow, release_escrow};
+use crate::escrow::{
+    create_escrow, get_escrow, refund_escrow, release_escrow, try_get_escrow, try_refund_escrow,
+    try_release_escrow,
+};
 
 // Helper to create a fresh Env with mock auth enabled.
 fn setup_env() -> Env {
@@ -107,6 +110,44 @@ fn test_refund_escrow_happy_path() {
 
         assert_eq!(before_contract_balance - amount, after_contract_balance);
         assert_eq!(before_depositor_balance + amount, after_depositor_balance);
+    });
+}
+
+#[test]
+fn test_get_escrow_missing_id_returns_not_found_error() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+
+    e.as_contract(&contract_id, || {
+        assert_eq!(try_get_escrow(&e, 999u32), Err("escrow not found"));
+    });
+}
+
+#[test]
+fn test_release_missing_id_returns_not_found_error() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let caller = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        assert_eq!(
+            try_release_escrow(&e, caller.clone(), 999u32),
+            Err("escrow not found")
+        );
+    });
+}
+
+#[test]
+fn test_refund_missing_id_returns_not_found_error() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let caller = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        assert_eq!(
+            try_refund_escrow(&e, caller.clone(), 999u32),
+            Err("escrow not found")
+        );
     });
 }
 
