@@ -1,5 +1,5 @@
 use crate::balance::{receive_balance, spend_balance};
-use crate::storage_types::DataKey;
+use crate::storage_types::{read_persistent_record, write_persistent_record, DataKey};
 use soroban_sdk::{contracttype, Address, Env, Symbol};
 
 #[contracttype]
@@ -40,9 +40,7 @@ pub fn create_escrow(e: &Env, depositor: Address, beneficiary: Address, amount: 
         released: false,
         refunded: false,
     };
-    e.storage()
-        .persistent()
-        .set(&DataKey::Escrow(count), &record);
+    write_persistent_record(e, &DataKey::Escrow(count), &record);
 
     // Optional observability event
     e.events().publish(
@@ -76,9 +74,7 @@ pub fn release_escrow(e: &Env, caller: Address, escrow_id: u32) {
 
     // Mark as released and persist
     escrow.released = true;
-    e.storage()
-        .persistent()
-        .set(&DataKey::Escrow(escrow_id), &escrow);
+    write_persistent_record(e, &DataKey::Escrow(escrow_id), &escrow);
 
     // Transfer funds from contract to beneficiary
     spend_balance(e, e.current_contract_address(), escrow.amount);
@@ -114,9 +110,7 @@ pub fn refund_escrow(e: &Env, caller: Address, escrow_id: u32) {
 
     // Mark as refunded and persist
     escrow.refunded = true;
-    e.storage()
-        .persistent()
-        .set(&DataKey::Escrow(escrow_id), &escrow);
+    write_persistent_record(e, &DataKey::Escrow(escrow_id), &escrow);
 
     // Transfer funds from contract back to depositor
     spend_balance(e, e.current_contract_address(), escrow.amount);
@@ -135,8 +129,5 @@ pub fn refund_escrow(e: &Env, caller: Address, escrow_id: u32) {
 
 // Read an escrow record by ID
 pub fn get_escrow(e: &Env, escrow_id: u32) -> EscrowRecord {
-    e.storage()
-        .persistent()
-        .get(&DataKey::Escrow(escrow_id))
-        .expect("escrow not found")
+    read_persistent_record(e, &DataKey::Escrow(escrow_id), "escrow not found")
 }
