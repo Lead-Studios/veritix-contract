@@ -544,3 +544,41 @@ fn test_set_admin_emits_event() {
     // Topics: (admin_set, current_admin), data: new_admin
     assert_eq!(events.first().unwrap().0.len(), 2);
 }
+
+// --- Issue #171: i128 boundary tests ---
+
+#[test]
+fn test_mint_i128_max_amount() {
+    let (env, admin, user) = setup();
+    env.mock_all_auths();
+    let client = create_client(&env);
+    initialize_client(&client, &env, &admin, 7);
+
+    client.mint(&admin, &user, &i128::MAX);
+    assert_eq!(client.balance(&user), i128::MAX);
+}
+
+#[test]
+#[should_panic(expected = "supply overflow")]
+fn test_mint_overflow_panics() {
+    let (env, admin, user) = setup();
+    env.mock_all_auths();
+    let client = create_client(&env);
+    initialize_client(&client, &env, &admin, 7);
+
+    client.mint(&admin, &user, &i128::MAX);
+    client.mint(&admin, &user, &1i128);
+}
+
+#[test]
+#[should_panic(expected = "amount must be positive")]
+fn test_transfer_zero_amount_panics() {
+    let (env, admin, user) = setup();
+    env.mock_all_auths();
+    let (_, user2) = (Address::generate(&env), Address::generate(&env));
+    let client = create_client(&env);
+    initialize_client(&client, &env, &admin, 7);
+
+    client.mint(&admin, &user, &1000i128);
+    client.transfer(&user, &user2, &0i128);
+}

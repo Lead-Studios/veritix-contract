@@ -42,6 +42,9 @@ pub enum DataKey {
 
     // Stores per-address freeze status.
     Freeze(Address),
+
+    // Stores the list of escrow IDs created by a given depositor.
+    DepositorEscrows(Address),
 }
 
 pub fn read_persistent_record<T>(e: &Env, key: &DataKey, missing_message: &'static str) -> T

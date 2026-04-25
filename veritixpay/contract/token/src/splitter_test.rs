@@ -391,3 +391,25 @@ fn test_cancel_split_emits_event() {
     // Topics: (split_cancelled, split_id, caller), data: total_amount
     assert_eq!(events.first().unwrap().0.len(), 3);
 }
+
+// --- Issue #171: i128 boundary tests ---
+
+#[test]
+fn test_split_with_single_recipient_full_bps() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let sender = Address::generate(&e);
+    let recipient = Address::generate(&e);
+    let amount = 1_000_000i128;
+
+    e.as_contract(&contract_id, || {
+        crate::balance::receive_balance(&e, sender.clone(), amount);
+        let recipients = make_recipients(&e, &[(recipient.clone(), 10000)]);
+        let split_id = create_split(&e, sender.clone(), recipients, amount);
+        distribute(&e, sender.clone(), split_id);
+
+        // Single recipient with 10000 bps gets all funds
+        assert_eq!(crate::balance::read_balance(&e, recipient.clone()), amount);
+        assert_eq!(crate::balance::read_balance(&e, sender.clone()), 0);
+    });
+}

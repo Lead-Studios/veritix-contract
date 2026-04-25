@@ -293,3 +293,49 @@ mod recurring_tests {
         assert_eq!(events.first().unwrap().0.len(), 3);
     }
 }
+
+// --- Issue #171: i128 boundary tests ---
+
+#[cfg(test)]
+mod recurring_boundary_tests {
+    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env};
+
+    use crate::contract::VeritixToken;
+    use crate::recurring::{execute_recurring, setup_recurring};
+
+    fn setup_env() -> Env {
+        let e = Env::default();
+        e.mock_all_auths();
+        e
+    }
+
+    #[test]
+    fn test_recurring_minimum_interval() {
+        let e = setup_env();
+        let contract_id = e.register_contract(None, VeritixToken);
+        let payer = Address::generate(&e);
+        let payee = Address::generate(&e);
+        let amount = 100i128;
+
+        let mut id = 0u32;
+        e.as_contract(&contract_id, || {
+            crate::balance::receive_balance(&e, payer.clone(), amount * 3);
+            // interval = 1: executes on every ledger advance
+            id = setup_recurring(&e, payer.clone(), payee.clone(), amount, 1);
+        });
+
+        // Advance ledger by 1 and execute
+        e.ledger().with_mut(|l| l.sequence_number += 1);
+        e.as_contract(&contract_id, || {
+            execute_recurring(&e, id);
+            assert_eq!(crate::balance::read_balance(&e, payee.clone()), amount);
+        });
+
+        // Advance again and execute a second time
+        e.ledger().with_mut(|l| l.sequence_number += 1);
+        e.as_contract(&contract_id, || {
+            execute_recurring(&e, id);
+            assert_eq!(crate::balance::read_balance(&e, payee.clone()), amount * 2);
+        });
+    }
+}

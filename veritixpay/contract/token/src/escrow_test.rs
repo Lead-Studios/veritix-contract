@@ -575,3 +575,121 @@ fn test_refund_escrow_emits_event() {
     // Topics: (escrow_refunded, escrow_id, depositor), data: amount
     assert_eq!(events.first().unwrap().0.len(), 3);
 }
+
+// --- Issue #171: i128 boundary tests ---
+
+#[test]
+fn test_escrow_amount_of_one() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let depositor = Address::generate(&e);
+    let beneficiary = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        crate::balance::receive_balance(&e, depositor.clone(), 1);
+        let escrow_id = create_escrow(&e, depositor.clone(), beneficiary.clone(), 1, 1000);
+        let record = get_escrow(&e, escrow_id);
+        assert_eq!(record.amount, 1);
+    });
+}
+
+// --- Issue #173: DepositorEscrows tests ---
+
+#[test]
+fn test_get_escrows_by_depositor_empty_before_any_escrow() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let depositor = Address::generate(&e);
+
+    e.as_contract(&contract_id, || {
+        let ids = crate::escrow::get_escrows_by_depositor(&e, depositor.clone());
+        assert_eq!(ids.len(), 0);
+    });
+}
+
+#[test]
+fn test_get_escrows_by_depositor_grows_with_each_escrow() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let depositor = Address::generate(&e);
+    let beneficiary = Address::generate(&e);
+    let amount = 100i128;
+
+    e.as_contract(&contract_id, || {
+        crate::balance::receive_balance(&e, depositor.clone(), amount * 3);
+
+        let id1 = create_escrow(&e, depositor.clone(), beneficiary.clone(), amount, 1000);
+        let ids = crate::escrow::get_escrows_by_depositor(&e, depositor.clone());
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids.get(0).unwrap(), id1);
+
+        let id2 = create_escrow(&e, depositor.clone(), beneficiary.clone(), amount, 1000);
+        let ids = crate::escrow::get_escrows_by_depositor(&e, depositor.clone());
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.get(1).unwrap(), id2);
+
+        let id3 = create_escrow(&e, depositor.clone(), beneficiary.clone(), amount, 1000);
+        let ids = crate::escrow::get_escrows_by_depositor(&e, depositor.clone());
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids.get(2).unwrap(), id3);
+    });
+}
+
+#[test]
+fn test_get_escrows_by_depositor_returns_correct_ids() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let depositor_a = Address::generate(&e);
+    let depositor_b = Address::generate(&e);
+    let beneficiary = Address::generate(&e);
+    let amount = 50i128;
+
+    e.as_contract(&contract_id, || {
+        crate::balance::receive_balance(&e, depositor_a.clone(), amount * 2);
+        crate::balance::receive_balance(&e, depositor_b.clone(), amount);
+
+        let id_a1 = create_escrow(&e, depositor_a.clone(), beneficiary.clone(), amount, 1000);
+        let _id_b = create_escrow(&e, depositor_b.clone(), beneficiary.clone(), amount, 1000);
+        let id_a2 = create_escrow(&e, depositor_a.clone(), beneficiary.clone(), amount, 1000);
+
+        let ids_a = crate::escrow::get_escrows_by_depositor(&e, depositor_a.clone());
+        assert_eq!(ids_a.len(), 2);
+        assert_eq!(ids_a.get(0).unwrap(), id_a1);
+        assert_eq!(ids_a.get(1).unwrap(), id_a2);
+
+        let ids_b = crate::escrow::get_escrows_by_depositor(&e, depositor_b.clone());
+        assert_eq!(ids_b.len(), 1);
+    });
+}
+
+#[test]
+fn test_escrows_by_depositor_via_contract_interface() {
+    let e = setup_env();
+    let contract_id = e.register_contract(None, VeritixToken);
+    let depositor = Address::generate(&e);
+    let beneficiary = Address::generate(&e);
+    let amount = 200i128;
+
+    e.as_contract(&contract_id, || {
+        crate::balance::receive_balance(&e, depositor.clone(), amount * 2);
+        let id1 = VeritixToken::create_escrow(
+            e.clone(),
+            depositor.clone(),
+            beneficiary.clone(),
+            amount,
+            1000,
+        );
+        let id2 = VeritixToken::create_escrow(
+            e.clone(),
+            depositor.clone(),
+            beneficiary.clone(),
+            amount,
+            1000,
+        );
+
+        let ids = VeritixToken::escrows_by_depositor(e.clone(), depositor.clone());
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.get(0).unwrap(), id1);
+        assert_eq!(ids.get(1).unwrap(), id2);
+    });
+}

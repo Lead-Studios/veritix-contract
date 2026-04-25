@@ -39,4 +39,7 @@ mod dispute_test;
 #[cfg(test)]
 mod recurring_test;
 
+#[cfg(test)]
+mod validation_test;
+
 pub use crate::contract::VeritixToken;

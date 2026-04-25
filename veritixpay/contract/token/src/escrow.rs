@@ -3,7 +3,7 @@ use crate::storage_types::{
     increment_counter, read_persistent_record, write_persistent_record, DataKey,
 };
 use crate::validation::{require_current_or_future_ledger, require_positive_amount};
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,6 +54,16 @@ pub fn create_escrow(
         expiry_ledger,
     };
     write_persistent_record(e, &DataKey::Escrow(count), &record);
+
+    // Append escrow ID to the depositor's list
+    let key = DataKey::DepositorEscrows(depositor.clone());
+    let mut ids: Vec<u32> = e
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(e));
+    ids.push_back(count);
+    e.storage().persistent().set(&key, &ids);
 
     // Optional observability event
     e.events().publish(
@@ -168,4 +178,12 @@ pub fn try_get_escrow(e: &Env, escrow_id: u32) -> Result<EscrowRecord, &'static 
     } else {
         Err("escrow not found")
     }
+}
+
+// Returns all escrow IDs created by a given depositor.
+pub fn get_escrows_by_depositor(e: &Env, depositor: Address) -> Vec<u32> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::DepositorEscrows(depositor))
+        .unwrap_or_else(|| Vec::new(e))
 }

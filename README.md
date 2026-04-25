@@ -84,6 +84,57 @@ make clean    # remove build artifacts
 
 ---
 
+### Localnet Integration Test
+
+The integration test deploys the compiled WASM to a local Soroban node and runs the full ticket purchase flow end-to-end: initialize → mint → create_escrow → release_escrow → assert balance.
+
+**Prerequisites**
+
+| Tool | Notes | Install |
+|------|-------|---------|
+| Docker | Required to run the Stellar quickstart image | https://docs.docker.com/get-docker |
+| stellar CLI | Already required for building | `cargo install stellar-cli` |
+
+**Start a local Soroban node**
+
+```bash
+docker run --rm -it \
+  -p 8000:8000 \
+  --name stellar \
+  stellar/quickstart:latest \
+  --standalone \
+  --enable-soroban-rpc
+```
+
+Wait until you see `Soroban RPC running` in the logs (usually ~10 seconds).
+
+**Run the integration test**
+
+```bash
+cd veritixpay/contract/token
+make integration-test
+```
+
+The script will build the contract, deploy it to localnet, run the full flow, and print `✅ Integration test passed` on success.
+
+**Environment overrides**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STELLAR_NETWORK` | `standalone` | Network name passed to stellar CLI |
+| `STELLAR_RPC_URL` | `http://localhost:8000/soroban/rpc` | Soroban RPC endpoint |
+| `STELLAR_NETWORK_PASSPHRASE` | `Standalone Network ; February 2017` | Network passphrase |
+
+```bash
+# Example: run against testnet
+STELLAR_NETWORK=testnet \
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org \
+STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015" \
+make integration-test
+```
+
+---
+
 ## Project Structure
 
 ```

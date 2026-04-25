@@ -6,7 +6,8 @@ use crate::balance::{
 };
 use crate::dispute::{get_dispute as dispute_get, open_dispute, resolve_dispute, DisputeRecord};
 use crate::escrow::{
-    create_escrow as escrow_create, get_escrow as escrow_get, refund_escrow as escrow_refund,
+    create_escrow as escrow_create, get_escrow as escrow_get,
+    get_escrows_by_depositor as escrow_get_by_depositor, refund_escrow as escrow_refund,
     release_escrow as escrow_release, EscrowRecord,
 };
 use crate::freeze::{freeze_account, is_frozen as read_frozen_status, unfreeze_account};
@@ -207,6 +208,11 @@ impl VeritixToken {
     /// Returns the current number of escrows created (monotonically increasing counter).
     pub fn escrow_count(e: Env) -> u32 {
         crate::storage_types::read_counter(&e, &crate::storage_types::DataKey::EscrowCount)
+    }
+
+    /// Returns all escrow IDs created by a given depositor.
+    pub fn escrows_by_depositor(e: Env, depositor: Address) -> Vec<u32> {
+        escrow_get_by_depositor(&e, depositor)
     }
 
     // --- Dispute ---

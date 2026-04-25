@@ -42,3 +42,7 @@ deploy:
 # Invoke a contract function. Usage: make invoke ARGS="balance alice"
 invoke:
 	bash $(CURDIR)/../../../scripts/invoke.sh $(ARGS)
+
+# Run the full localnet integration test (requires a running localnet — see README.md)
+integration-test:
+	bash $(CURDIR)/../../../scripts/integration_test.sh
