@@ -1245,3 +1245,24 @@ impl VeritixContract {
         crate::escrow::trigger_auto_release_escrow(&e, escrow_id);
     }
 }
+
+use soroban_sdk::{contract, contractimpl, Address, Env, Option};
+use crate::storage_types::DataKey;
+
+#[contract]
+pub struct VeritixContract;
+
+#[contractimpl]
+impl VeritixContract {
+    /// Sets the protocol fee and treasury address for escrow releases (admin-only, max 5%).
+    pub fn set_protocol_fee(e: Env, admin: Address, fee_bps: u32, treasury: Address) {
+        crate::escrow::set_escrow_fee_config(&e, &admin, fee_bps, &treasury);
+    }
+
+    /// Retrieves the current escrow protocol fee basis points and treasury address.
+    pub fn get_protocol_fee(e: Env) -> (u32, Option<Address>) {
+        let fee_bps: u32 = e.storage().instance().get(&DataKey::ProtocolFeeBps).unwrap_or(0);
+        let treasury: Option<Address> = e.storage().instance().get(&DataKey::ProtocolTreasury);
+        (fee_bps, treasury)
+    }
+}

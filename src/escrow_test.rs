@@ -1304,3 +1304,29 @@ mod auto_release_tests {
         VeritixContract::trigger_auto_release(env.clone(), caller, escrow_id);
     }
 }
+
+#[cfg(test)]
+mod escrow_fee_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_escrow_protocol_fee_deductions_and_limits() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        // Test valid 2% fee (200 bps)
+        VeritixContract::set_protocol_fee(env.clone(), admin.clone(), 200, treasury.clone());
+        let (bps, _) = VeritixContract::get_protocol_fee(env.clone());
+        assert_eq!(bps, 200);
+
+        // Test invalid fee exceeding 500 bps (> 5%) expecting panic
+        let result = std::panic::catch_unwind(|| {
+            VeritixContract::set_protocol_fee(env.clone(), admin.clone(), 600, treasury.clone());
+        });
+        assert!(result.is_err());
+    }
+}

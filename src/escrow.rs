@@ -737,3 +737,45 @@ pub fn trigger_auto_release_escrow(e: &Env, escrow_id: u32) {
 
     // Transfer token funds to beneficiary...
 }
+
+use soroban_sdk::{Address, Env};
+use crate::storage_types::DataKey;
+
+pub const MAX_PROTOCOL_FEE_BPS: u32 = 500; // Maximum 5% protocol fee
+
+pub fn set_escrow_fee_config(e: &Env, admin: &Address, fee_bps: u32, treasury: &Address) {
+    admin.require_auth();
+
+    if fee_bps > MAX_PROTOCOL_FEE_BPS {
+        panic!("Protocol fee exceeds maximum allowed basis points (500)");
+    }
+
+    e.storage().instance().set(&DataKey::ProtocolFeeBps, &fee_bps);
+    e.storage().instance().set(&DataKey::ProtocolTreasury, treasury);
+}
+
+pub fn release_escrow_with_fee(e: &Env, escrow_id: u32) {
+    let key = DataKey::Escrow(escrow_id);
+    let mut record: EscrowRecord = e.storage().instance().get(&key).unwrap_or_else(|| {
+        panic!("Escrow record not found");
+    });
+
+    if record.released {
+        panic!("Escrow already released");
+    }
+
+    let fee_bps: u32 = e.storage().instance().get(&DataKey::ProtocolFeeBps).unwrap_or(0);
+    let fee_amount = (record.amount * fee_bps as i128) / 10000;
+    let beneficiary_amount = record.amount - fee_amount;
+
+    record.released = true;
+    e.storage().instance().set(&key, &record);
+
+    if fee_amount > 0 {
+        if let Some(treasury) = e.storage().instance().get::<DataKey, Address>(&DataKey::ProtocolTreasury) {
+            // Transfer fee_amount to treasury...
+        }
+    }
+
+    // Transfer beneficiary_amount to record.beneficiary...
+}
