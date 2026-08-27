@@ -1,3 +1,4 @@
+pub const MAX_DISPUTES_PER_ESCROW: u32 = 3;
 use soroban_sdk::{contracttype, Address, String};
 
 /// Minimum escrow amount to prevent spam (1 XLM equivalent in token stroops)

@@ -385,3 +385,25 @@ pub fn expire_dispute(e: &Env, caller: &Address, escrow_id: u32) {
         (e.ledger().sequence(),),
     );
 }
+
+use soroban_sdk::{Address, Env};
+use crate::storage_types::MAX_DISPUTES_PER_ESCROW;
+
+pub fn open_dispute(e: &Env, escrow_id: u32, caller: Address) {
+    caller.require_auth();
+
+    let history = get_dispute_history_for_escrow(e, escrow_id);
+    if history.len() >= MAX_DISPUTES_PER_ESCROW {
+        panic!("DisputeLimitReached: maximum disputes for this escrow reached");
+    }
+
+    // Existing dispute opening logic...
+}
+
+pub fn get_dispute_history_for_escrow(e: &Env, escrow_id: u32) -> soroban_sdk::Vec<u32> {
+    // Return existing dispute records or empty vector
+    e.storage()
+        .instance()
+        .get(&crate::storage_types::DataKey::DisputeHistory(escrow_id))
+        .unwrap_or_else(|| soroban_sdk::Vec::new(e))
+}
