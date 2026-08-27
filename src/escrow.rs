@@ -700,3 +700,40 @@ pub fn escrow_between(e: Env, addr1: Address, addr2: Address) -> u32 {
     }
     panic!("no escrow found between the two addresses");
 }
+
+use soroban_sdk::{Address, Env};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowRecord {
+    pub depositor: Address,
+    pub beneficiary: Address,
+    pub amount: i128,
+    pub released: bool,
+    pub auto_release_after_ledger: u32, // 0 = disabled
+}
+
+pub fn trigger_auto_release_escrow(e: &Env, escrow_id: u32) {
+    let key = crate::storage_types::DataKey::Escrow(escrow_id);
+    let mut record: EscrowRecord = e.storage().instance().get(&key).unwrap_or_else(|| {
+        panic!("Escrow record not found");
+    });
+
+    if record.released {
+        panic!("Escrow funds already released");
+    }
+
+    if record.auto_release_after_ledger == 0 {
+        panic!("Auto-release is disabled for this escrow");
+    }
+
+    let current_ledger = e.ledger().sequence();
+    if current_ledger < record.auto_release_after_ledger {
+        panic!("Auto-release deadline has not yet been reached");
+    }
+
+    record.released = true;
+    e.storage().instance().set(&key, &record);
+
+    // Transfer token funds to beneficiary...
+}

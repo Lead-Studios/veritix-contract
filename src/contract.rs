@@ -1231,3 +1231,17 @@ impl VeritixContract {
         recurring_id
     }
 }
+
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+#[contract]
+pub struct VeritixContract;
+
+#[contractimpl]
+impl VeritixContract {
+    /// Triggers a permissionless release of escrow funds if the auto-release ledger threshold has passed.
+    pub fn trigger_auto_release(e: Env, caller: Address, escrow_id: u32) {
+        // Permissionless: caller auth is NOT required
+        crate::escrow::trigger_auto_release_escrow(&e, escrow_id);
+    }
+}

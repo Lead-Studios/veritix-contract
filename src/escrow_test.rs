@@ -1282,3 +1282,25 @@ fn test_dispute_on_one_escrow_does_not_affect_others() {
     assert!(t.client.get_escrow(&id2).released);
     assert!(!t.client.get_escrow(&id1).released);
 }
+
+#[cfg(test)]
+mod auto_release_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_permissionless_auto_release_after_ledger() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_id = 101;
+        let target_ledger = 500;
+
+        // Set mock ledger sequence past the target deadline
+        env.ledger().set_sequence_number(target_ledger + 10);
+
+        // Execute permissionless auto-release without caller authentication requirements
+        let caller = Address::generate(&env);
+        VeritixContract::trigger_auto_release(env.clone(), caller, escrow_id);
+    }
+}
