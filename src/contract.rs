@@ -1199,3 +1199,35 @@ impl VeriTixPayTrait for VeriTixPay {
         escrow::trigger_auto_release(e, escrow_id)
     }
 }
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+#[contract]
+pub struct VeritixContract;
+
+#[contractimpl]
+impl VeritixContract {
+    /// Sets up a recurring payment schedule with an optional maximum execution limit.
+    pub fn setup_recurring(
+        e: Env,
+        payer: Address,
+        payee: Address,
+        amount: i128,
+        max_executions: u32,
+    ) -> u32 {
+        payer.require_auth();
+        
+        let recurring_id = /* generate or fetch next ID */;
+        let record = crate::recurring::RecurringRecord {
+            payer,
+            payee,
+            amount,
+            active: true,
+            paused: false,
+            execution_count: 0,
+            max_executions,
+        };
+
+        e.storage().instance().set(&crate::storage_types::DataKey::Recurring(recurring_id), &record);
+        recurring_id
+    }
+}

@@ -295,3 +295,38 @@ fn test_resume_recurring_non_payer_panics() {
     // A non-payer caller must not be able to resume another payer's recurring payment.
     client.resume_recurring(&intruder, &id);
 }
+
+#[cfg(test)]
+mod max_execution_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_recurring_auto_deactivates_after_max_executions() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let payer = Address::generate(&env);
+        let payee = Address::generate(&env);
+        let max_execs = 3;
+
+        let recurring_id = VeritixContract::setup_recurring(
+            env.clone(),
+            payer,
+            payee,
+            100_i128,
+            max_execs,
+        );
+
+        // Execute 3 times and verify deactivation on the third
+        for i in 1..=3 {
+            crate::recurring::execute_recurring_payment(&env, recurring_id);
+            let active = VeritixContract::is_recurring_active(env.clone(), recurring_id);
+            if i < 3 {
+                assert!(active);
+            } else {
+                assert!(!active);
+            }
+        }
+    }
+}
