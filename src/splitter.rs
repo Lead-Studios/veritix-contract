@@ -214,6 +214,21 @@ pub fn replace_split_recipient(
     );
 }
 
+
+use soroban_sdk::{Address, Env, Vec};
+use crate::storage_types::DataKey;
+
+pub fn index_split_for_sender(e: &Env, sender: &Address, split_id: u32) {
+    let key = DataKey::SenderSplits(sender.clone());
+    let mut splits: Vec<u32> = e
+        .storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(e));
+
+    if !splits.contains(split_id) {
+        splits.push_back(split_id);
+        e.storage().instance().set(&key, &splits);
 pub const MAX_SPLIT_FEE_BPS: u32 = 200; // Maximum 2% protocol fee
 
 pub fn set_split_fee_config(e: &Env, admin: &Address, fee_bps: u32, treasury: &Address) {
