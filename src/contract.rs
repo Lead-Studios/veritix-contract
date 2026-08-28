@@ -2364,6 +2364,9 @@ impl VeriTixPayTrait for VeriTixPay {
     }
 }
 
+
+use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use crate::storage_types::DataKey;
 // #773: Auxiliary contract exposing recurring history/payee views and split fee
 // configuration. The four separate contract blocks merged in #773 are
 // consolidated here so the crate compiles.
@@ -2375,6 +2378,9 @@ pub struct VeritixContract;
 
 #[contractimpl]
 impl VeritixContract {
+    /// Retrieves all split payment IDs created by a specific sender address.
+    pub fn get_splits_by_sender(e: Env, sender: Address) -> Vec<u32> {
+        let key = DataKey::SenderSplits(sender);
     /// Retrieves the execution audit log for a specific recurring payment schedule.
     ///
     /// # Arguments
