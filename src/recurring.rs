@@ -297,6 +297,39 @@ pub fn get_recurring_by_payer(e: &Env, payer: &Address) -> Vec<u32> {
         .unwrap_or(Vec::new(e))
 }
 
+use soroban_sdk::{Address, Env, Symbol};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringRecord {
+    pub payer: Address,
+    pub payee: Address,
+    pub amount: i128,
+    pub active: bool,
+    pub paused: bool,
+    pub execution_count: u32,
+    pub max_executions: u32, // 0 = unlimited
+}
+
+pub fn execute_recurring_payment(e: &Env, recurring_id: u32) {
+    let key = crate::storage_types::DataKey::Recurring(recurring_id);
+    let mut record: RecurringRecord = e.storage().instance().get(&key).unwrap_or_else(|| {
+        panic!("Recurring payment record not found");
+    });
+
+    if !record.active || record.paused {
+        panic!("Recurring payment is inactive or paused");
+    }
+
+    record.execution_count += 1;
+
+    if record.max_executions > 0 && record.execution_count >= record.max_executions {
+        record.active = false;
+    }
+
+    e.storage().instance().set(&key, &record);
+}
+
 /// #735: transfer a recurring payment to a new payer. Both the current payer
 /// and the new payer must authenticate, and the payer index is updated so the
 /// recurring id shows up under the new payer.

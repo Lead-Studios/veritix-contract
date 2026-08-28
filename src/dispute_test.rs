@@ -541,6 +541,30 @@ fn test_is_dispute_open_returns_false_without_dispute() {
     assert!(!t.client.is_dispute_open(&u32::MAX));
 }
 
+
+#[cfg(test)]
+mod dispute_cap_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    #[should_panic(expected = "DisputeLimitReached")]
+    fn test_dispute_count_cap_per_escrow_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_id = 99;
+        let caller = Address::generate(&env);
+
+        // Simulate reaching the max dispute limit (3 disputes)
+        for _ in 0..3 {
+            crate::dispute::open_dispute(&env, escrow_id, caller.clone());
+        }
+
+        // 4th attempt should trigger the panic
+        crate::dispute::open_dispute(&env, escrow_id, caller);
+    }
+}
 // ── #750: dispute_stats ───────────────────────────────────────────────────────
 
 #[test]

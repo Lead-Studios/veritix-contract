@@ -2364,6 +2364,8 @@ impl VeriTixPayTrait for VeriTixPay {
     }
 }
 
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 use crate::storage_types::DataKey;
@@ -2378,6 +2380,48 @@ pub struct VeritixContract;
 
 #[contractimpl]
 impl VeritixContract {
+    /// Sets up a recurring payment schedule with an optional maximum execution limit.
+    pub fn setup_recurring(
+        e: Env,
+        payer: Address,
+        payee: Address,
+        amount: i128,
+        max_executions: u32,
+    ) -> u32 {
+        payer.require_auth();
+        
+        let recurring_id = /* generate or fetch next ID */;
+        let record = crate::recurring::RecurringRecord {
+            payer,
+            payee,
+            amount,
+            active: true,
+            paused: false,
+            execution_count: 0,
+            max_executions,
+        };
+
+        e.storage().instance().set(&crate::storage_types::DataKey::Recurring(recurring_id), &record);
+        recurring_id
+    }
+}
+
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+#[contract]
+pub struct VeritixContract;
+
+#[contractimpl]
+impl VeritixContract {
+    /// Triggers a permissionless release of escrow funds if the auto-release ledger threshold has passed.
+    pub fn trigger_auto_release(e: Env, caller: Address, escrow_id: u32) {
+        // Permissionless: caller auth is NOT required
+        crate::escrow::trigger_auto_release_escrow(&e, escrow_id);
+    }
+}
+
+use soroban_sdk::{contract, contractimpl, Address, Env, Option};
+use crate::storage_types::DataKey;
     /// Retrieves all split payment IDs created by a specific sender address.
     pub fn get_splits_by_sender(e: Env, sender: Address) -> Vec<u32> {
         let key = DataKey::SenderSplits(sender);
@@ -2394,29 +2438,11 @@ impl VeritixContract {
         e.storage().instance().get(&key).unwrap_or_else(|| Vec::new(&e))
     }
 
-    /// Retrieves all recurring payment IDs associated with a specific payee address.
-    ///
-    /// # Arguments
-    /// - `e` — contract environment (auto-injected).
-    /// - `payee` — the payee to query.
-    ///
-    /// # Returns
-    /// A vector of recurring payment IDs (empty if none exist).
     pub fn get_recurring_by_payee(e: Env, payee: Address) -> Vec<u32> {
         let key = DataKey::PayeeRecurrings(payee);
         e.storage().instance().get(&key).unwrap_or_else(|| Vec::new(&e))
     }
 
-    /// Returns a boolean indicating whether a recurring payment schedule is currently active and not paused,
-    /// avoiding the overhead of fetching the full payment record.
-    ///
-    /// # Arguments
-    /// - `e` — contract environment (auto-injected).
-    /// - `recurring_id` — recurring payment to check.
-    ///
-    /// # Returns
-    /// `true` when the schedule is active and not paused; `false` otherwise
-    /// (including when the record does not exist).
     pub fn is_recurring_active(e: Env, recurring_id: u32) -> bool {
         let key = DataKey::Recurring(recurring_id);
 
@@ -2438,30 +2464,19 @@ pub struct VeritixContract;
 
 #[contractimpl]
 impl VeritixContract {
-    /// Sets the protocol fee and treasury address for split distributions
-    /// (admin-only, max 2%).
-    ///
-    /// # Arguments
-    /// - `e` — contract environment (auto-injected).
-    /// - `admin` — the contract admin (authenticated).
-    /// - `fee_bps` — split protocol fee in basis points (<= 200).
-    /// - `treasury` — address receiving the split fee.
-    ///
-    /// # Panics
-    /// - `Split protocol fee exceeds maximum allowed basis points (200)` if
-    ///   `fee_bps > 200`.
-    /// Sets the protocol fee and treasury address for split distributions (admin-only, max 2%).
+    /// Sets the protocol fee and treasury address for escrow releases (admin-only, max 5%).
+    pub fn set_protocol_fee(e: Env, admin: Address, fee_bps: u32, treasury: Address) {
+        crate::escrow::set_escrow_fee_config(&e, &admin, fee_bps, &treasury);
+    }
+
+    pub fn get_protocol_fee(e: Env) -> (u32, Option<Address>) {
+        let fee_bps: u32 = e.storage().instance().get(&DataKey::ProtocolFeeBps).unwrap_or(0);
+        let treasury: Option<Address> = e.storage().instance().get(&DataKey::ProtocolTreasury);
     pub fn set_split_protocol_fee(e: Env, admin: Address, fee_bps: u32, treasury: Address) {
         crate::splitter::set_split_fee_config(&e, &admin, fee_bps, &treasury);
     }
 
-    /// Retrieves the current split protocol fee basis points and treasury address.
-    ///
-    /// # Arguments
-    /// - `e` — contract environment (auto-injected).
-    ///
-    /// # Returns
-    /// `(fee_bps, treasury)` where `treasury` is `None` if not configured.
+
     pub fn get_split_protocol_fee(e: Env) -> (u32, Option<Address>) {
         let fee_bps: u32 = e.storage().instance().get(&DataKey::SplitProtocolFeeBps).unwrap_or(0);
         let treasury: Option<Address> = e.storage().instance().get(&DataKey::SplitProtocolTreasury);

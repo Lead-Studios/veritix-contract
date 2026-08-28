@@ -1,3 +1,4 @@
+pub const MAX_DISPUTES_PER_ESCROW: u32 = 3;
 use soroban_sdk::{contracttype, Address, String};
 
 /// Minimum escrow amount to prevent spam (1 XLM equivalent in token stroops)
@@ -133,7 +134,11 @@ use soroban_sdk::{contracttype, Address};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     // ... existing keys
+    ProtocolFeeBps,
+    ProtocolTreasury,
+}
     SenderSplits(Address),
+
 // NOTE: RecurringExecution is a standalone record; the DataKey variants that
 // earlier merged PRs appended as duplicate `enum DataKey` blocks were merged
 // into the single enum above to fix duplicate-definition compile errors.
