@@ -261,6 +261,19 @@ fn test_raise_dispute_by_beneficiary_succeeds() {
     let t = setup();
     soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &10_000_000);
     let expiry = t.e.ledger().sequence() + 1000;
+    let id = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    t.client.raise_dispute(&t.beneficiary, &id);
+    t.client.resolve_dispute(&t.arbiter, &id, &t.beneficiary);
+    assert!(t.client.get_escrow(&id).released);
+}
+
 // ── #695: is_dispute_open ─────────────────────────────────────────────────────
 
 #[test]
@@ -278,8 +291,7 @@ fn test_is_dispute_open_returns_true_when_dispute_is_open() {
         &crate::escrow_test::empty_memo(&t.e),
     );
     t.client.raise_dispute(&t.beneficiary, &id);
-    t.client.resolve_dispute(&t.arbiter, &id, &t.beneficiary);
-    assert!(t.client.get_escrow(&id).released);
+    assert!(t.client.is_dispute_open(&id));
 }
 
 // ── #670: appeal and resolve_appeal ───────────────────────────────────────────
@@ -422,15 +434,17 @@ fn test_expire_dispute_not_disputed_panics() {
     let t = setup();
     soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &10_000_000);
     let expiry = t.e.ledger().sequence() + 1000;
+    let id = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
         &10_000_000,
         &expiry,
         &crate::escrow_test::empty_memo(&t.e),
     );
 
-    assert!(!t.client.is_dispute_open(&id));
-
-    t.client.raise_dispute(&t.depositor, &id);
-    assert!(t.client.is_dispute_open(&id));
+    // Expiring a dispute that was never opened must panic.
+    t.client.expire_dispute(&t.depositor, &id);
 }
 
 #[test]
@@ -447,7 +461,11 @@ fn test_is_dispute_open_returns_false_after_resolution() {
         &expiry,
         &crate::escrow_test::empty_memo(&t.e),
     );
-    t.client.expire_dispute(&t.depositor, &id);
+    t.client.raise_dispute(&t.depositor, &id);
+    assert!(t.client.is_dispute_open(&id));
+
+    t.client.resolve_dispute(&t.arbiter, &id, &t.beneficiary);
+    assert!(!t.client.is_dispute_open(&id));
 }
 
 // ── #672: dispute claimant index (portableDD) ─────────────────────────────────
@@ -514,16 +532,6 @@ fn test_dispute_index_isolation_between_claimants() {
         let disputes = crate::dispute::get_disputes_by_claimant(t.e.clone(), other);
         assert_eq!(disputes.len(), 0);
     });
-        &10_000_000,
-        &expiry,
-        &crate::escrow_test::empty_memo(&t.e),
-    );
-
-    t.client.raise_dispute(&t.depositor, &id);
-    assert!(t.client.is_dispute_open(&id));
-
-    t.client.resolve_dispute(&t.arbiter, &id, &t.beneficiary);
-    assert!(!t.client.is_dispute_open(&id));
 }
 
 #[test]
@@ -531,4 +539,157 @@ fn test_is_dispute_open_returns_false_without_dispute() {
     let t = setup();
     // Escrow that was never disputed reports false.
     assert!(!t.client.is_dispute_open(&u32::MAX));
+}
+
+
+#[cfg(test)]
+mod dispute_cap_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    #[should_panic(expected = "DisputeLimitReached")]
+    fn test_dispute_count_cap_per_escrow_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_id = 99;
+        let caller = Address::generate(&env);
+
+        // Simulate reaching the max dispute limit (3 disputes)
+        for _ in 0..3 {
+            crate::dispute::open_dispute(&env, escrow_id, caller.clone());
+        }
+
+        // 4th attempt should trigger the panic
+        crate::dispute::open_dispute(&env, escrow_id, caller);
+    }
+}
+// ── #750: dispute_stats ───────────────────────────────────────────────────────
+
+#[test]
+fn test_dispute_stats_initial_all_zero() {
+    let t = setup();
+    let stats = t.client.dispute_stats();
+    assert_eq!(stats.open, 0);
+    assert_eq!(stats.resolved_for_beneficiary, 0);
+    assert_eq!(stats.resolved_for_depositor, 0);
+    assert_eq!(stats.expired, 0);
+}
+
+#[test]
+fn test_dispute_stats_open_count_increments_on_open() {
+    let t = setup();
+    soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &10_000_000);
+    let expiry = t.e.ledger().sequence() + 1000;
+    let id = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    assert_eq!(t.client.dispute_stats().open, 0);
+
+    t.client.raise_dispute(&t.depositor, &id);
+    assert_eq!(t.client.dispute_stats().open, 1);
+}
+
+#[test]
+fn test_dispute_stats_resolved_for_beneficiary_count_increments() {
+    let t = setup();
+    soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &10_000_000);
+    let expiry = t.e.ledger().sequence() + 1000;
+    let id = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    t.client.raise_dispute(&t.depositor, &id);
+    t.client.resolve_dispute(&t.arbiter, &id, &t.beneficiary);
+
+    let stats = t.client.dispute_stats();
+    assert_eq!(stats.resolved_for_beneficiary, 1);
+    assert_eq!(stats.open, 0);
+}
+
+#[test]
+fn test_dispute_stats_resolved_for_depositor_count_increments() {
+    let t = setup();
+    soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &10_000_000);
+    let expiry = t.e.ledger().sequence() + 1000;
+    let id = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    t.client.raise_dispute(&t.depositor, &id);
+    t.client.resolve_dispute(&t.arbiter, &id, &t.depositor);
+
+    let stats = t.client.dispute_stats();
+    assert_eq!(stats.resolved_for_depositor, 1);
+    assert_eq!(stats.open, 0);
+}
+
+#[test]
+fn test_dispute_stats_open_decrements_after_resolution() {
+    let t = setup();
+    soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &20_000_000);
+    let expiry = t.e.ledger().sequence() + 1000;
+    let id1 = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    let id2 = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    t.client.raise_dispute(&t.depositor, &id1);
+    t.client.raise_dispute(&t.depositor, &id2);
+    assert_eq!(t.client.dispute_stats().open, 2);
+
+    t.client.resolve_dispute(&t.arbiter, &id1, &t.beneficiary);
+    assert_eq!(t.client.dispute_stats().open, 1);
+    assert_eq!(t.client.dispute_stats().resolved_for_beneficiary, 1);
+}
+
+#[test]
+fn test_dispute_stats_expired_increments_after_expire() {
+    let t = setup();
+    soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&t.depositor, &10_000_000);
+    let expiry = t.e.ledger().sequence() + 1000;
+    let id = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &crate::escrow_test::empty_memo(&t.e),
+    );
+    let opened_at = t.e.ledger().sequence();
+    t.client.raise_dispute(&t.depositor, &id);
+    assert_eq!(t.client.dispute_stats().open, 1);
+
+    t.e.ledger()
+        .with_mut(|l| l.sequence_number = opened_at + crate::dispute::DISPUTE_EXPIRE_AFTER + 1);
+    t.client.expire_dispute(&t.depositor, &id);
+
+    let stats = t.client.dispute_stats();
+    assert_eq!(stats.expired, 1);
+    assert_eq!(stats.open, 0);
 }

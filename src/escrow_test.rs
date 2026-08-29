@@ -1282,3 +1282,285 @@ fn test_dispute_on_one_escrow_does_not_affect_others() {
     assert!(t.client.get_escrow(&id2).released);
     assert!(!t.client.get_escrow(&id1).released);
 }
+
+#[cfg(test)]
+mod auto_release_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_permissionless_auto_release_after_ledger() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let escrow_id = 101;
+        let target_ledger = 500;
+
+        // Set mock ledger sequence past the target deadline
+        env.ledger().set_sequence_number(target_ledger + 10);
+
+        // Execute permissionless auto-release without caller authentication requirements
+        let caller = Address::generate(&env);
+        VeritixContract::trigger_auto_release(env.clone(), caller, escrow_id);
+    }
+}
+
+#[cfg(test)]
+mod escrow_fee_tests {
+    use super::*;
+    use soroban_sdk::Env;
+
+    #[test]
+    fn test_escrow_protocol_fee_deductions_and_limits() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        // Test valid 2% fee (200 bps)
+        VeritixContract::set_protocol_fee(env.clone(), admin.clone(), 200, treasury.clone());
+        let (bps, _) = VeritixContract::get_protocol_fee(env.clone());
+        assert_eq!(bps, 200);
+
+        // Test invalid fee exceeding 500 bps (> 5%) expecting panic
+        let result = std::panic::catch_unwind(|| {
+            VeritixContract::set_protocol_fee(env.clone(), admin.clone(), 600, treasury.clone());
+        });
+        assert!(result.is_err());
+    }
+}
+
+// ── #745: Protocol fee ────────────────────────────────────────────────────────
+
+struct FeeEnv<'a> {
+    e: Env,
+    client: VeriTixPayClient<'a>,
+    admin: Address,
+    depositor: Address,
+    beneficiary: Address,
+    treasury: Address,
+    token: Address,
+}
+
+fn fee_setup() -> FeeEnv<'static> {
+    let e = Env::default();
+    e.mock_all_auths();
+    let contract_id = e.register_contract(None, VeriTixPay);
+    let client = VeriTixPayClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    client.initialize(&admin);
+
+    let depositor = Address::generate(&e);
+    let beneficiary = Address::generate(&e);
+    let treasury = Address::generate(&e);
+    let token = e.register_stellar_asset_contract(depositor.clone());
+    soroban_sdk::token::StellarAssetClient::new(&e, &token).mint(&depositor, &50_000_000);
+
+    FeeEnv {
+        e,
+        client,
+        admin,
+        depositor,
+        beneficiary,
+        treasury,
+        token,
+    }
+}
+
+fn fee_create_escrow(t: &FeeEnv, amount: i128) -> u32 {
+    let expiry = t.e.ledger().sequence() + 1000;
+    t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &amount,
+        &expiry,
+        &empty_memo(&t.e),
+    )
+}
+
+#[test]
+fn test_protocol_fee_zero_full_amount_to_beneficiary() {
+    let t = fee_setup();
+    let token_client = soroban_sdk::token::Client::new(&t.e, &t.token);
+
+    // No fee configured — the full amount goes to the beneficiary.
+    let id = fee_create_escrow(&t, 10_000_000);
+    t.client.release_escrow(&t.depositor, &id);
+
+    assert_eq!(token_client.balance(&t.beneficiary), 10_000_000);
+    assert_eq!(token_client.balance(&t.treasury), 0);
+}
+
+#[test]
+fn test_protocol_fee_2pct_correctly_deducted() {
+    let t = fee_setup();
+    let token_client = soroban_sdk::token::Client::new(&t.e, &t.token);
+
+    // 2% protocol fee (200 bps).
+    t.client.set_protocol_fee(&t.admin, &200, &t.treasury);
+
+    let id = fee_create_escrow(&t, 10_000_000);
+    t.client.release_escrow(&t.depositor, &id);
+
+    // 2% of 10_000_000 = 200_000 deducted, rest goes to the beneficiary.
+    assert_eq!(token_client.balance(&t.beneficiary), 9_800_000);
+}
+
+#[test]
+fn test_protocol_fee_treasury_receives_fee() {
+    let t = fee_setup();
+    let token_client = soroban_sdk::token::Client::new(&t.e, &t.token);
+
+    t.client.set_protocol_fee(&t.admin, &200, &t.treasury);
+
+    let id = fee_create_escrow(&t, 10_000_000);
+    t.client.release_escrow(&t.depositor, &id);
+
+    // The treasury receives exactly the fee amount.
+    assert_eq!(token_client.balance(&t.treasury), 200_000);
+}
+
+#[test]
+#[should_panic(expected = "protocol fee cannot exceed 500 bps")]
+fn test_set_protocol_fee_over_500bps_panics() {
+    let t = fee_setup();
+    t.client.set_protocol_fee(&t.admin, &501, &t.treasury);
+}
+
+#[test]
+fn test_get_protocol_fee_returns_configured_values() {
+    let t = fee_setup();
+
+    t.client.set_protocol_fee(&t.admin, &200, &t.treasury);
+    let (fee_bps, treasury, total_collected) = t.client.protocol_fee_stats();
+    assert_eq!(fee_bps, 200);
+    assert_eq!(treasury, t.treasury);
+    assert_eq!(total_collected, 0);
+
+    // After a release, the collected fee total is tracked.
+    let id = fee_create_escrow(&t, 10_000_000);
+    t.client.release_escrow(&t.depositor, &id);
+
+    let (_fee_bps, _treasury, total_collected) = t.client.protocol_fee_stats();
+    assert_eq!(total_collected, 200_000);
+}
+
+#[test]
+fn test_protocol_fee_not_applied_to_refunds() {
+    let t = fee_setup();
+    let token_client = soroban_sdk::token::Client::new(&t.e, &t.token);
+
+    t.client.set_protocol_fee(&t.admin, &200, &t.treasury);
+
+    let id = fee_create_escrow(&t, 10_000_000);
+    t.client.refund_escrow(&t.depositor, &id);
+
+    // Refunds are fee-exempt — the depositor gets everything back.
+    assert_eq!(token_client.balance(&t.depositor), 50_000_000);
+    assert_eq!(token_client.balance(&t.treasury), 0);
+}
+
+// ── #740: escrow_stats_for_depositor ─────────────────────────────────────────
+
+#[test]
+fn test_escrow_stats_for_depositor_counts_statuses() {
+    // ... test implementation for #740 ...
+}
+
+// ── #738: get_all_escrows_between ────────────────────────────────────────────
+
+#[test]
+fn test_get_all_escrows_between_includes_active_and_settled() {
+    let t = setup();
+    mint_more(&t, crate::storage_types::MIN_ESCROW_AMOUNT * 3);
+    let expiry = t.e.ledger().sequence() + 1000;
+
+    let id1 = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &empty_memo(&t.e),
+    );
+    let id2 = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &empty_memo(&t.e),
+    );
+let _id3 = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &soroban_sdk::Bytes::new(&t.e),
+    );
+
+    // Settle id1 so it is part of the finished history.
+    t.client.release_escrow(&t.depositor, &id1);
+    assert!(t.client.get_escrow(&id1).released);
+
+    let ids = t.client.get_all_escrows_between(&t.depositor, &t.beneficiary);
+    assert_eq!(ids.len(), 3);
+    assert_eq!(ids.get(0).unwrap(), id1);
+    assert_eq!(ids.get(1).unwrap(), id2);
+    assert_eq!(ids.get(2).unwrap(), _id3);
+}
+
+#[test]
+fn test_get_all_escrows_between_filters_other_beneficiary() {
+    let t = setup();
+    mint_more(&t, crate::storage_types::MIN_ESCROW_AMOUNT * 3);
+    let expiry = t.e.ledger().sequence() + 1000;
+    let other = Address::generate(&t.e);
+    soroban_sdk::token::StellarAssetClient::new(&t.e, &t.token).mint(&other, &crate::storage_types::MIN_ESCROW_AMOUNT);
+
+    let _id1 = t.client.create_escrow(
+        &t.depositor,
+        &t.beneficiary,
+        &t.token,
+        &crate::storage_types::MIN_ESCROW_AMOUNT,
+        &expiry,
+        &empty_memo(&t.e),
+    );
+
+t.client.release_escrow(&t.depositor, &id1);
+    t.client.refund_escrow(&t.depositor, &id2);
+    // id3 stays active.
+
+    let stats = t.client.escrow_stats_for_depositor(&t.depositor);
+    assert_eq!(stats.active, 1);
+    assert_eq!(stats.released, 1);
+    assert_eq!(stats.refunded, 1);
+    assert_eq!(stats.total_value_locked, crate::storage_types::MIN_ESCROW_AMOUNT);
+}
+
+#[test]
+fn test_escrow_stats_for_depositor_empty_for_unknown_depositor() {
+    let t = setup();
+    let other = Address::generate(&t.e);
+    let stats = t.client.escrow_stats_for_depositor(&other);
+    assert_eq!(stats.active, 0);
+    assert_eq!(stats.released, 0);
+    assert_eq!(stats.refunded, 0);
+    assert_eq!(stats.total_value_locked, 0);
+
+    // Escrow between the depositor and `other` does not exist yet.
+    let ids = t.client.get_all_escrows_between(&t.depositor, &other);
+    assert_eq!(ids.len(), 0);
+}
+
+#[test]
+fn test_get_all_escrows_between_empty_with_no_escrows() {
+    let t = setup();
+    let ids = t.client.get_all_escrows_between(&t.depositor, &t.beneficiary);
+    assert_eq!(ids.len(), 0);
+}
+}

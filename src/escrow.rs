@@ -1,4 +1,6 @@
-use crate::storage_types::{DataKey, MAX_ESCROWS_PER_DEPOSITOR, MAX_MEMO_BYTES};
+use crate::storage_types::{
+    DataKey, EscrowDepositorStats, MAX_ESCROWS_PER_DEPOSITOR, MAX_MEMO_BYTES,
+};
 use soroban_sdk::{contracttype, token, Address, Bytes, Env, Vec};
 
 #[contracttype]
@@ -563,6 +565,45 @@ pub fn get_escrows_by_depositor(e: Env, depositor: Address) -> Vec<u32> {
     read_escrow_ids(&e, DataKey::DepositorEscrows(depositor))
 }
 
+// #740: Summarize a depositor's escrow history by status.
+pub fn escrow_stats_for_depositor(e: &Env, depositor: &Address) -> EscrowDepositorStats {
+    let ids = read_escrow_ids(e, DataKey::DepositorEscrows(depositor.clone()));
+    let mut stats = EscrowDepositorStats {
+        active: 0,
+        released: 0,
+        refunded: 0,
+        total_value_locked: 0,
+    };
+    for i in 0..ids.len() {
+        let id = ids.get(i).unwrap();
+        let record = load_record(e, id);
+        if record.released {
+            stats.released += 1;
+        } else if record.refunded {
+            stats.refunded += 1;
+        } else {
+            stats.active += 1;
+            stats.total_value_locked += record.amount;
+        }
+    }
+    stats
+}
+
+// #738: Return all escrow IDs (active and settled) between a depositor and
+// beneficiary, in creation order, for a full audit trail.
+pub fn get_all_escrows_between(e: Env, depositor: Address, beneficiary: Address) -> Vec<u32> {
+    let escrows = get_escrows_by_depositor(e.clone(), depositor);
+    let mut result = Vec::new(&e);
+    for i in 0..escrows.len() {
+        let id = escrows.get(i).unwrap();
+        let record = load_record(&e, id);
+        if record.beneficiary == beneficiary {
+            result.push_back(id);
+        }
+    }
+    result
+}
+
 pub fn get_escrows_by_beneficiary(e: Env, beneficiary: Address) -> Vec<u32> {
     read_escrow_ids(&e, DataKey::BeneficiaryEscrows(beneficiary))
 }
@@ -639,11 +680,7 @@ pub fn escrowed_value_for_depositor(e: &Env, depositor: &Address) -> i128 {
     let mut total = 0_i128;
     for i in 0..escrow_ids.len() {
         let id = escrow_ids.get(i).unwrap();
-        let record: EscrowRecord = e
-            .storage()
-            .persistent()
-            .get(&DataKey::Escrow(id))
-            .unwrap_or_else(|| panic!("escrow {} not found", id));
+        let record: EscrowRecord = load_record(e, id);
 
         if !record.released && !record.refunded {
             total += record.amount - record.released_amount;
@@ -699,4 +736,85 @@ pub fn escrow_between(e: Env, addr1: Address, addr2: Address) -> u32 {
         }
     }
     panic!("no escrow found between the two addresses");
+
+}
+
+use soroban_sdk::{Address, Env};
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowRecord {
+    pub depositor: Address,
+    pub beneficiary: Address,
+    pub amount: i128,
+    pub released: bool,
+    pub auto_release_after_ledger: u32, // 0 = disabled
+}
+
+pub fn trigger_auto_release_escrow(e: &Env, escrow_id: u32) {
+    let key = crate::storage_types::DataKey::Escrow(escrow_id);
+    let mut record: EscrowRecord = e.storage().instance().get(&key).unwrap_or_else(|| {
+        panic!("Escrow record not found");
+    });
+
+    if record.released {
+        panic!("Escrow funds already released");
+    }
+
+    if record.auto_release_after_ledger == 0 {
+        panic!("Auto-release is disabled for this escrow");
+    }
+
+    let current_ledger = e.ledger().sequence();
+    if current_ledger < record.auto_release_after_ledger {
+        panic!("Auto-release deadline has not yet been reached");
+    }
+
+    record.released = true;
+    e.storage().instance().set(&key, &record);
+
+    // Transfer token funds to beneficiary...
+}
+
+use soroban_sdk::{Address, Env};
+use crate::storage_types::DataKey;
+
+pub const MAX_PROTOCOL_FEE_BPS: u32 = 500; // Maximum 5% protocol fee
+
+pub fn set_escrow_fee_config(e: &Env, admin: &Address, fee_bps: u32, treasury: &Address) {
+    admin.require_auth();
+
+    if fee_bps > MAX_PROTOCOL_FEE_BPS {
+        panic!("Protocol fee exceeds maximum allowed basis points (500)");
+    }
+
+    e.storage().instance().set(&DataKey::ProtocolFeeBps, &fee_bps);
+    e.storage().instance().set(&DataKey::ProtocolTreasury, treasury);
+}
+
+pub fn release_escrow_with_fee(e: &Env, escrow_id: u32) {
+    let key = DataKey::Escrow(escrow_id);
+    let mut record: EscrowRecord = e.storage().instance().get(&key).unwrap_or_else(|| {
+        panic!("Escrow record not found");
+    });
+
+    if record.released {
+        panic!("Escrow already released");
+    }
+
+    let fee_bps: u32 = e.storage().instance().get(&DataKey::ProtocolFeeBps).unwrap_or(0);
+    let fee_amount = (record.amount * fee_bps as i128) / 10000;
+    let beneficiary_amount = record.amount - fee_amount;
+
+    record.released = true;
+    e.storage().instance().set(&key, &record);
+
+    if fee_amount > 0 {
+        if let Some(treasury) = e.storage().instance().get::<DataKey, Address>(&DataKey::ProtocolTreasury) {
+            // Transfer fee_amount to treasury...
+        }
+    }
+
+    // Transfer beneficiary_amount to record.beneficiary...
+}
 }

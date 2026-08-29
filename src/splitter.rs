@@ -213,3 +213,48 @@ pub fn replace_split_recipient(
         (),
     );
 }
+
+
+use soroban_sdk::{Address, Env, Vec};
+use crate::storage_types::DataKey;
+
+pub fn index_split_for_sender(e: &Env, sender: &Address, split_id: u32) {
+    let key = DataKey::SenderSplits(sender.clone());
+    let mut splits: Vec<u32> = e
+        .storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(e));
+
+    if !splits.contains(split_id) {
+        splits.push_back(split_id);
+        e.storage().instance().set(&key, &splits);
+pub const MAX_SPLIT_FEE_BPS: u32 = 200; // Maximum 2% protocol fee
+
+pub fn set_split_fee_config(e: &Env, admin: &Address, fee_bps: u32, treasury: &Address) {
+    admin.require_auth();
+    
+    if fee_bps > MAX_SPLIT_FEE_BPS {
+        panic!("Split protocol fee exceeds maximum allowed basis points (200)");
+    }
+
+    e.storage().instance().set(&DataKey::SplitProtocolFeeBps, &fee_bps);
+    e.storage().instance().set(&DataKey::SplitProtocolTreasury, treasury);
+}
+
+pub fn calculate_split_fee(e: &Env, total_amount: i128) -> (i128, Option<(Address, i128)>) {
+    let fee_bps: u32 = e.storage().instance().get(&DataKey::SplitProtocolFeeBps).unwrap_or(0);
+    
+    if fee_bps == 0 {
+        return (total_amount, None);
+    }
+
+    let fee_amount = (total_amount * fee_bps as i128) / 10000;
+    let remainder_amount = total_amount - fee_amount;
+
+    if let Some(treasury) = e.storage().instance().get::<DataKey, Address>(&DataKey::SplitProtocolTreasury) {
+        (remainder_amount, Some((treasury, fee_amount)))
+    } else {
+        (total_amount, None)
+    }
+}
