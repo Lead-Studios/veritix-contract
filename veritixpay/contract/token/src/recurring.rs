@@ -180,7 +180,7 @@ pub fn transfer_recurring_payer(
     append_payer_index(e, &new_payer, recurring_id);
 
     e.events()
-        .publish((symbol_short!("recur_xfer_p"), recurring_id, new_payer), ());
+        .publish((soroban_sdk::Symbol::new(e, "recur_xfer_p"), recurring_id, new_payer), ());
 }
 
 pub fn get_recurring(e: &Env, recurring_id: u32) -> RecurringRecord {
@@ -248,5 +248,5 @@ pub fn cancel_recurring_batch(e: &Env, payer: Address, recurring_ids: Vec<u32>) 
             .extend_ttl(&key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
     }
     e.events()
-        .publish((symbol_short!("rcur_batch_c"), payer), count);
+        .publish((soroban_sdk::Symbol::new(e, "rcur_batch_c"), payer), count);
 }

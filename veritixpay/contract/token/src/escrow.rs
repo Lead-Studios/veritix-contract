@@ -7,7 +7,7 @@ use crate::balance::{receive_balance, spend_balance};
 use crate::storage_types::{
     increment_counter, read_persistent_record, write_persistent_record, DataKey,
     ESCROW_BUMP_AMOUNT, ESCROW_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT,
-    PERSISTENT_LIFETIME_THRESHOLD,
+    PERSISTENT_LIFETIME_THRESHOLD, WARNING_WINDOW,
 };
 use crate::validation::{require_current_or_future_ledger, require_positive_amount};
 use soroban_sdk::{contracttype, symbol_short, vec, Address, Env, Vec};

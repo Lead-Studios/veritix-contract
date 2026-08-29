@@ -61,6 +61,7 @@ pub enum DataKey {
     Split(u32),
     DisputeCount,
     Dispute(u32),
+    ClaimantDisputes(Address),
     EscrowDispute(u32),
     EscrowDisputeHistory(u32),
     ResolverDisputes(Address),

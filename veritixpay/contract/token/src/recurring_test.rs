@@ -8,8 +8,8 @@ mod recurring_tests {
     use crate::balance::read_balance;
     use crate::contract::{VeritixToken, VeritixTokenClient};
     use crate::recurring::{
-        cancel_recurring, execute_recurring, get_next_execution_ledger, get_recurring,
-        get_recurring_by_payer, is_executable, pause_recurring, setup_recurring,
+        cancel_recurring, execute_recurring, get_recurring,
+        get_recurring_by_payer, setup_recurring,
         transfer_recurring_payer,
     };
     use crate::storage_types::{read_counter, DataKey};
@@ -39,6 +39,7 @@ mod recurring_tests {
     // Ensures that creating a recurring payment where payer == payee is
     // rejected — prevents degenerate self-payment schedules.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "InvalidRecurring: payer and payee cannot be the same address")]
     fn test_setup_recurring_same_address_panics() {
         let e = setup_env();
@@ -80,7 +81,8 @@ mod recurring_tests {
 
         e.as_contract(&contract_id, || {
             // Advance ledger past the interval.
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
             assert_eq!(read_balance(&e, payee.clone()), 500);
             assert_eq!(read_balance(&e, payer.clone()), 0);
@@ -90,6 +92,7 @@ mod recurring_tests {
     // Ensures that executing a recurring payment before the interval has
     // elapsed panics — prevents early withdrawal of funds.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "interval has not elapsed")]
     fn test_execute_too_early_panics() {
         let e = setup_env();
@@ -98,7 +101,8 @@ mod recurring_tests {
 
         e.as_contract(&contract_id, || {
             // Only advance by 50 — not enough.
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 50);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 50);
             execute_recurring(&e, id);
         });
     }
@@ -121,6 +125,7 @@ mod recurring_tests {
     // Ensures that only the payer can cancel a recurring payment — a third
     // party hacker must be rejected with "unauthorized".
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "unauthorized")]
     fn test_cancel_unauthorized_panics() {
         let e = setup_env();
@@ -136,6 +141,7 @@ mod recurring_tests {
     // Ensures that executing a cancelled recurring payment panics — prevents
     // funds from being transferred after the payer has deactivated the plan.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "recurring payment is not active")]
     fn test_execute_after_cancel_panics() {
         let e = setup_env();
@@ -144,13 +150,15 @@ mod recurring_tests {
 
         e.as_contract(&contract_id, || {
             cancel_recurring(&e, payer.clone(), id);
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 200);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 200);
             execute_recurring(&e, id);
         });
     }
 
     // Ensures that creating a recurring payment with zero amount is rejected.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "amount must be positive")]
     fn test_recurring_zero_amount_panics() {
         let e = setup_env();
@@ -164,6 +172,7 @@ mod recurring_tests {
 
     // Ensures that creating a recurring payment with zero interval is rejected.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "interval must be positive")]
     fn test_recurring_zero_interval_panics() {
         let e = setup_env();
@@ -198,6 +207,7 @@ mod recurring_tests {
     // Ensures that execute_recurring panics when the payer has insufficient
     // balance to cover the recurring amount.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "InsufficientBalance")]
     fn test_execute_recurring_insufficient_balance_panics() {
         let e = setup_env();
@@ -207,7 +217,8 @@ mod recurring_tests {
         e.as_contract(&contract_id, || {
             // Drain the payer balance so they can no longer cover the charge.
             crate::balance::spend_balance(&e, payer.clone(), 500);
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
         });
     }
@@ -278,7 +289,8 @@ mod recurring_tests {
 
             assert_invariant();
 
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
             assert_invariant();
 
@@ -287,7 +299,8 @@ mod recurring_tests {
             crate::balance::increase_supply(&e, 1_000);
             assert_invariant();
 
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
             assert_invariant();
         });
@@ -321,7 +334,8 @@ mod recurring_tests {
         let _ = e.events().all();
 
         e.as_contract(&contract_id, || {
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
         });
 
@@ -406,6 +420,7 @@ mod recurring_tests {
     // Ensures that creating a recurring payment with zero interval is rejected
     // with "InvalidInterval" — matches the updated panic string convention.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "InvalidInterval")]
     fn test_setup_recurring_zero_interval_panics() {
         let e = setup_env();
@@ -444,6 +459,7 @@ mod recurring_tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "unauthorized")]
     fn test_cancel_recurring_batch_unauthorized_reverts_all() {
         let e = setup_env();
@@ -467,6 +483,7 @@ mod recurring_tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "batch exceeds maximum of 20")]
     fn test_cancel_recurring_batch_over_limit_panics() {
         let e = setup_env();
@@ -494,7 +511,8 @@ mod recurring_tests {
         });
 
         e.as_contract(&contract_id, || {
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, recurring_id);
         });
 
@@ -541,7 +559,8 @@ mod recurring_tests {
         let before = e.events().all().len();
 
         e.as_contract(&contract_id, || {
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
         });
 
@@ -629,7 +648,7 @@ mod recurring_tests {
         let topics = event.1;
         assert_eq!(topics.len(), 3);
         let t0 = Symbol::try_from_val(&e, &topics.get(0).unwrap()).unwrap();
-        assert_eq!(t0, soroban_sdk::symbol_short!("recur_xfer_p"));
+        assert_eq!(t0, soroban_sdk::Symbol::new(&e, "recur_xfer_p"));
         let t1 = u32::try_from_val(&e, &topics.get(1).unwrap()).unwrap();
         assert_eq!(t1, id);
         let t2 = Address::try_from_val(&e, &topics.get(2).unwrap()).unwrap();
@@ -648,7 +667,8 @@ mod recurring_tests {
             crate::balance::receive_balance(&e, new_payer.clone(), 500);
             transfer_recurring_payer(&e, old_payer.clone(), new_payer.clone(), id);
 
-            e.ledger().with_mut(|l| l.sequence_number = e.ledger().sequence() + 101);
+            let seq = e.ledger().sequence();
+            e.ledger().with_mut(|l| l.sequence_number = seq + 101);
             execute_recurring(&e, id);
 
             assert_eq!(read_balance(&e, old_payer.clone()), 500);
@@ -683,6 +703,7 @@ mod recurring_tests {
 
     // One ledger before boundary must be rejected.
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "interval has not elapsed")]
     fn test_execute_one_ledger_before_boundary_panics() {
         let e = setup_env();

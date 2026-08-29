@@ -14,59 +14,6 @@ pub struct BatchEntry {
     pub amount: i128,
 }
 
-
-
-fn setup_escrow(e: &Env, contract_id: &Address) -> (Address, Address, u32) {
-    let depositor = Address::generate(e);
-    let beneficiary = Address::generate(e);
-    let amount = 1_000i128;
-    let mut escrow_id = 0u32;
-    e.as_contract(contract_id, || {
-        crate::balance::receive_balance(e, depositor.clone(), amount);
-        escrow_id = create_escrow(e, depositor.clone(), beneficiary.clone(), amount, 1000);
-    });
-    (depositor, beneficiary, escrow_id)
-}
-
-
-
-pub fn read_allowance(e: &Env, from: Address, spender: Address) -> AllowanceValue {
-    let key = DataKey::Allowance(AllowanceDataKey {
-        from: from.clone(),
-        spender: spender.clone(),
-    });
-
-    if let Some(allowance) = e
-        .storage()
-        .persistent()
-        .get::<DataKey, AllowanceValue>(&key)
-    {
-        // Equal-to-current-ledger approvals are still valid for the current ledger.
-        // They become expired only once the sequence advances past expiration_ledger.
-        if allowance.expiration_ledger < e.ledger().sequence() {
-            // Prune expired entry from storage
-            e.storage().persistent().remove(&key);
-            AllowanceValue {
-                amount: 0,
-                expiration_ledger: allowance.expiration_ledger,
-            }
-        } else {
-            // Extend TTL on active allowance read
-            e.storage().persistent().extend_ttl(
-                &key,
-                ALLOWANCE_LIFETIME_THRESHOLD,
-                ALLOWANCE_BUMP_AMOUNT,
-            );
-            allowance
-        }
-    } else {
-        AllowanceValue {
-            amount: 0,
-            expiration_ledger: 0,
-        }
-    }
-}
-
 pub fn clawback_batch(e: &Env, admin: Address, targets: Vec<(Address, i128)>) {
     check_admin(e, &admin);
     if targets.len() > MAX_BATCH_TARGETS {
@@ -81,59 +28,6 @@ pub fn clawback_batch(e: &Env, admin: Address, targets: Vec<(Address, i128)>) {
         spend_balance(e, from.clone(), amount);
         decrease_supply(e, amount);
         e.events().publish((symbol_short!("clawback"), admin.clone(), from), amount);
-    }
-}
-
-
-
-fn setup_escrow(e: &Env, contract_id: &Address) -> (Address, Address, u32) {
-    let depositor = Address::generate(e);
-    let beneficiary = Address::generate(e);
-    let amount = 1_000i128;
-    let mut escrow_id = 0u32;
-    e.as_contract(contract_id, || {
-        crate::balance::receive_balance(e, depositor.clone(), amount);
-        escrow_id = create_escrow(e, depositor.clone(), beneficiary.clone(), amount, 1000);
-    });
-    (depositor, beneficiary, escrow_id)
-}
-
-
-
-pub fn read_allowance(e: &Env, from: Address, spender: Address) -> AllowanceValue {
-    let key = DataKey::Allowance(AllowanceDataKey {
-        from: from.clone(),
-        spender: spender.clone(),
-    });
-
-    if let Some(allowance) = e
-        .storage()
-        .persistent()
-        .get::<DataKey, AllowanceValue>(&key)
-    {
-        // Equal-to-current-ledger approvals are still valid for the current ledger.
-        // They become expired only once the sequence advances past expiration_ledger.
-        if allowance.expiration_ledger < e.ledger().sequence() {
-            // Prune expired entry from storage
-            e.storage().persistent().remove(&key);
-            AllowanceValue {
-                amount: 0,
-                expiration_ledger: allowance.expiration_ledger,
-            }
-        } else {
-            // Extend TTL on active allowance read
-            e.storage().persistent().extend_ttl(
-                &key,
-                ALLOWANCE_LIFETIME_THRESHOLD,
-                ALLOWANCE_BUMP_AMOUNT,
-            );
-            allowance
-        }
-    } else {
-        AllowanceValue {
-            amount: 0,
-            expiration_ledger: 0,
-        }
     }
 }
 

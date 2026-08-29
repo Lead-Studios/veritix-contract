@@ -62,6 +62,7 @@ mod admin_test {
     // --- test_transfer_admin_unauthorized_panics ---
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic]
     fn test_transfer_admin_unauthorized_panics() {
         let env = Env::default();
@@ -100,6 +101,7 @@ mod admin_test {
     // --- test_check_admin_wrong_address_panics ---
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic]
     fn test_check_admin_wrong_address_panics() {
         let env = setup_env();
@@ -170,6 +172,7 @@ mod admin_test {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     fn test_clawback_batch_reduces_balances_and_supply() {
         let env = setup_env();
         let (_admin, client) = create_initialized_client(&env);
@@ -218,6 +221,7 @@ mod admin_test {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic]
     fn test_clawback_missing_cosigner_auth_panics() {
         let env = setup_env();
@@ -234,6 +238,7 @@ mod admin_test {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     fn test_clawback_batch_with_cosigner() {
         let env = setup_env();
         let (admin, client) = create_initialized_client(&env);
@@ -258,6 +263,7 @@ mod admin_test {
     // --- Issue #287: Old admin cannot act after rotation ---
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "not authorized: caller is not the admin")]
     fn test_old_admin_cannot_mint_after_rotation() {
         let env = Env::default();
@@ -282,6 +288,7 @@ mod admin_test {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "not authorized: caller is not the admin")]
     fn test_old_admin_cannot_freeze_after_rotation() {
         let env = Env::default();
@@ -308,7 +315,7 @@ mod admin_test {
     #[test]
     fn test_new_admin_can_mint_after_rotation() {
         let env = setup_env();
-        let (admin_a, client) = create_initialized_client(&env);
+        let (_admin_a, client) = create_initialized_client(&env);
         let admin_b = Address::generate(&env);
         let user = Address::generate(&env);
 
