@@ -224,7 +224,7 @@ fn test_ticket_purchase_dispute_path() {
     assert_eq!(client.balance(&buyer), 0);
 
     let evidence = soroban_sdk::Bytes::new(&env);
-    let dispute_id = client.open_dispute(&buyer, &escrow_id, &resolver, &evidence, &1000u32);
+    let dispute_id = client.open_dispute(&buyer, &escrow_id, &resolver, &evidence, &1000u32, &0u32);
 
     client.resolve_dispute(&resolver, &dispute_id, &false);
 

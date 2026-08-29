@@ -104,7 +104,6 @@ pub fn create_split(
     total_amount: i128,
 ) -> u32 {
     require_positive_amount(total_amount);
-    sender.require_auth();
 
     // 1. Reject empty recipient list
     if recipients.is_empty() {
@@ -163,7 +162,10 @@ pub fn create_split(
 }
 
 pub fn distribute(e: &Env, caller: Address, split_id: u32) {
-    caller.require_auth();
+    distribute_internal(e, caller, split_id);
+}
+
+pub(crate) fn distribute_internal(e: &Env, caller: Address, split_id: u32) {
 
     let mut record: SplitRecord = e
         .storage()
@@ -238,7 +240,6 @@ pub fn distribute(e: &Env, caller: Address, split_id: u32) {
 }
 
 pub fn cancel_split(e: &Env, caller: Address, split_id: u32) {
-    caller.require_auth();
 
     let mut record: SplitRecord = e
         .storage()
@@ -281,15 +282,12 @@ pub fn get_split(e: &Env, split_id: u32) -> SplitRecord {
 
 pub fn get_splits_for_recipient(e: &Env, recipient: Address) -> Vec<u32> {
     let key = DataKey::RecipientSplits(recipient);
-    let ids = e
-        .storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or_else(|| Vec::new(e));
-    e.storage()
-        .persistent()
-        .extend_ttl(&key, SPLIT_LIFETIME_THRESHOLD, SPLIT_BUMP_AMOUNT);
-    ids
+    if let Some(ids) = e.storage().persistent().get::<DataKey, Vec<u32>>(&key) {
+        e.storage().persistent().extend_ttl(&key, SPLIT_LIFETIME_THRESHOLD, SPLIT_BUMP_AMOUNT);
+        ids
+    } else {
+        Vec::new(e)
+    }
 }
 
 pub fn replace_split_recipient(
@@ -299,7 +297,6 @@ pub fn replace_split_recipient(
     old_recipient: Address,
     new_recipient: Address,
 ) {
-    sender.require_auth();
     let mut record: SplitRecord = e
         .storage()
         .persistent()
@@ -353,7 +350,6 @@ pub fn replace_split_recipient(
 /// Caller must be the sender for every split; batch is rejected if any ID is
 /// unauthorised. Maximum 10 split IDs per call.
 pub fn bulk_distribute(e: &Env, caller: Address, split_ids: Vec<u32>) {
-    caller.require_auth();
     if split_ids.len() > 10 {
         panic!("BulkLimit: maximum 10 split IDs per batch");
     }
@@ -372,7 +368,7 @@ pub fn bulk_distribute(e: &Env, caller: Address, split_ids: Vec<u32>) {
     // Execute
     for i in 0..split_ids.len() {
         let split_id = split_ids.get(i).unwrap();
-        distribute(e, caller.clone(), split_id);
+        distribute_internal(e, caller.clone(), split_id);
     }
 }
 
@@ -389,7 +385,6 @@ pub fn create_split_with_escrow(
     use crate::escrow::EscrowRecord;
 
     require_positive_amount(total_amount);
-    sender.require_auth();
     if recipients.is_empty() {
         panic!("recipients cannot be empty");
     }

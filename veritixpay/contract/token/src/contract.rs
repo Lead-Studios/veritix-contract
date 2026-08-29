@@ -4,12 +4,13 @@ use crate::admin::{
     transfer_admin, write_admin, write_clawback_cosigner,
 };
 use crate::allowance::{get_allowances_for_spender, read_allowance, revoke_all_allowances, spend_allowance, validate_allowance, write_allowance};
-use crate::balance::{decrease_supply, increase_supply, read_balance, read_max_supply, read_total_supply, receive_balance, spend_balance, set_max_supply};
+use crate::balance::{decrease_supply, increase_supply, read_balance, read_max_supply, read_total_supply, receive_balance, spend_balance};
 use crate::batch::{approve_batch, burn_from_batch, clawback_batch, freeze_batch, transfer_batch_with_memo, unfreeze_batch};
 use crate::storage_types::DataKey;
 use crate::dispute::{
     expire_dispute, get_dispute as dispute_get, get_dispute_history_for_escrow,
     get_open_disputes, open_dispute, resolve_dispute, DisputeRecord,
+    get_disputes_by_claimant,
 };
 use crate::escrow::{
     admin_settle_escrow as escrow_admin_settle, create_escrow as escrow_create,
@@ -28,7 +29,7 @@ use crate::recurring::{
     transfer_recurring_payer, RecurringRecord,
 };
 use crate::splitter::{
-    cancel_split as split_cancel, create_split as split_create, distribute as split_distribute,
+    create_split as split_create,
     get_split as split_get, get_splits_for_recipient as split_get_for_recipient,
     splitter_stats as split_stats, SplitRecord, SplitRecipient, SplitterStats,
 };
@@ -128,7 +129,7 @@ impl VeritixToken {
         check_admin(&e, &admin);
         crate::balance::set_max_supply(&e, new_max);
         e.events().publish(
-            (symbol_short!("max_supply"), admin),
+            (soroban_sdk::Symbol::new(&e, "max_supply"), admin),
             (new_max,),
         );
     }
@@ -530,8 +531,8 @@ impl VeritixToken {
     /// ```rust,ignore
     /// let dispute_id = client.open_dispute(&buyer, &escrow_id, &resolver, &evidence_bytes, &expiry);
     /// ```
-    pub fn open_dispute(e: Env, claimant: Address, escrow_id: u32, resolver: Address, evidence: Bytes, expiry_ledger: u32) -> u32 {
-        open_dispute(&e, claimant, escrow_id, resolver, evidence, expiry_ledger)
+    pub fn open_dispute(e: Env, claimant: Address, escrow_id: u32, resolver: Address, evidence: Bytes, expiry_ledger: u32, mediation_fee_bps: u32) -> u32 {
+        open_dispute(&e, claimant, escrow_id, resolver, evidence, expiry_ledger, mediation_fee_bps)
     }
     /// Resolves an open dispute, releasing the escrowed funds to one party.
     ///
@@ -565,6 +566,9 @@ impl VeritixToken {
     pub fn get_open_disputes(e: Env) -> Vec<u32> {
         get_open_disputes(&e)
     }
+    pub fn get_disputes_by_claimant(e: Env, claimant: Address) -> Vec<u32> {
+        get_disputes_by_claimant(&e, claimant)
+    }
     pub fn dispute_count(e: Env) -> u32 {
         crate::storage_types::bump_instance(&e);
         crate::storage_types::read_counter(&e, &crate::storage_types::DataKey::DisputeCount)
@@ -590,7 +594,65 @@ impl VeritixToken {
     /// let split_id = client.create_split(&sender, &recipients, &1_000_0000i128);
     /// ```
     pub fn create_split(e: Env, sender: Address, recipients: Vec<SplitRecipient>, total_amount: i128) -> u32 {
+        sender.require_auth();
         split_create(&e, sender, recipients, total_amount)
+    }
+    pub fn split_to_escrow(
+        e: Env,
+        sender: Address,
+        recipients: Vec<SplitRecipient>,
+        total_amount: i128,
+        expiry_ledger: u32,
+    ) -> Vec<u32> {
+        sender.require_auth();
+        require_positive_amount(total_amount);
+
+        if recipients.is_empty() {
+            panic!("recipients list cannot be empty");
+        }
+        if recipients.len() > 20 {
+            panic!("TooManyRecipients: maximum 20 recipients allowed");
+        }
+
+        let mut total_bps: u32 = 0;
+        for i in 0..recipients.len() {
+            let r = recipients.get(i).unwrap();
+            if r.share_bps == 0 {
+                panic!("recipient share_bps cannot be zero");
+            }
+            for j in (i + 1)..recipients.len() {
+                if r.address == recipients.get(j).unwrap().address {
+                    panic!("duplicate recipient address");
+                }
+            }
+            total_bps += r.share_bps;
+        }
+        if total_bps != 10000 {
+            panic!("InvalidShares: recipient shares must sum to exactly 10000 bps");
+        }
+
+        let mut escrow_ids = Vec::new(&e);
+        let mut allocated: i128 = 0;
+        let len = recipients.len();
+        for i in 0..len {
+            let recipient = recipients.get(i).unwrap();
+            let share = if i == len - 1 {
+                total_amount - allocated
+            } else {
+                total_amount * recipient.share_bps as i128 / 10000
+            };
+            allocated += share;
+
+            let escrow_id = escrow_create(&e, sender.clone(), recipient.address.clone(), share, expiry_ledger);
+            escrow_ids.push_back(escrow_id);
+        }
+
+        e.events().publish(
+            (soroban_sdk::Symbol::new(&e, "split_escrow"), sender),
+            total_amount,
+        );
+
+        escrow_ids
     }
     /// Distributes a previously created split, transferring each recipient's share.
     ///
@@ -609,16 +671,19 @@ impl VeritixToken {
     /// client.distribute(&sender, &split_id);
     /// ```
     pub fn distribute(e: Env, caller: Address, split_id: u32) {
-        split_distribute(&e, caller, split_id)
+        caller.require_auth();
+        crate::splitter::distribute(&e, caller, split_id);
     }
     pub fn cancel_split(e: Env, caller: Address, split_id: u32) {
-        split_cancel(&e, caller, split_id)
+        caller.require_auth();
+        crate::splitter::cancel_split(&e, caller, split_id);
     }
     pub fn get_split(e: Env, split_id: u32) -> SplitRecord {
         split_get(&e, split_id)
     }
     pub fn replace_split_recipient(e: Env, sender: Address, split_id: u32, old_recipient: Address, new_recipient: Address) {
-        crate::splitter::replace_split_recipient(&e, sender, split_id, old_recipient, new_recipient)
+        sender.require_auth();
+        crate::splitter::replace_split_recipient(&e, sender, split_id, old_recipient, new_recipient);
     }
     pub fn get_splits_for_recipient(e: Env, recipient: Address) -> Vec<u32> {
         split_get_for_recipient(&e, recipient)

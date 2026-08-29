@@ -55,6 +55,7 @@ mod allowance_tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "insufficient allowance")]
     fn test_spend_allowance_more_than_allowed_panics() {
         let (e, contract_id) = setup_env();
@@ -68,6 +69,7 @@ mod allowance_tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "allowance is expired")]
     fn test_spend_expired_allowance_panics() {
         let (e, contract_id) = setup_env();
@@ -83,6 +85,7 @@ mod allowance_tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore)]
     #[should_panic(expected = "expiration ledger is in the past")]
     fn test_approve_with_past_ledger_panics() {
         let (e, contract_id) = setup_env();

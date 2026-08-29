@@ -3,14 +3,14 @@ use crate::contract::VeritixTokenClient;
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
 // Helper functions for setup
-fn setup() -> (Env, Address, Address) {
+pub(crate) fn setup() -> (Env, Address, Address) {
     let env = Env::default();
     let admin = Address::generate(&env);
     let user = Address::generate(&env);
     (env, admin, user)
 }
 
-fn create_client(env: &Env) -> VeritixTokenClient<'_> {
+pub(crate) fn create_client(env: &Env) -> VeritixTokenClient<'_> {
     let contract_id = env.register_contract(None, VeritixToken);
     VeritixTokenClient::new(env, &contract_id)
 }

@@ -22,3 +22,6 @@ lto = true
 inherits = "release"
 debug-assertions = true
 
+[patch.crates-io]
+ethnum = { path = "../ethnum-patched" }
+

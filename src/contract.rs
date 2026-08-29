@@ -768,6 +768,7 @@ impl VeriTixPayTrait for VeriTixPay {
 
     fn expire_dispute(e: Env, caller: Address, escrow_id: u32) {
         dispute::expire_dispute(&e, &caller, escrow_id)
+    }
     fn pause_recurring(e: Env, caller: Address, recurring_id: u32) {
         recurring::pause_recurring(&e, &caller, recurring_id)
     }

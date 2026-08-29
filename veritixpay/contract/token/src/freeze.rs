@@ -11,10 +11,8 @@ pub fn is_frozen(e: &Env, addr: &Address) -> bool {
     frozen
 }
 
-pub fn freeze_account(e: &Env, _admin: Address, target: Address) {
-    let admin = _admin;
-    // prevent admin from freezing themselves
-    let stored_admin: Address = e.storage().persistent().get(&DataKey::Admin).expect("admin not set");
+pub fn freeze_account(e: &Env, admin: Address, target: Address) {
+    let stored_admin = crate::admin::read_admin(e);
     if target == stored_admin {
         panic!("InvalidFreeze: cannot freeze the admin address");
     }
@@ -38,8 +36,7 @@ pub fn freeze_account(e: &Env, _admin: Address, target: Address) {
     e.events().publish((symbol_short!("frozen"), target), admin);
 }
 
-pub fn unfreeze_account(e: &Env, _admin: Address, target: Address) {
-    let admin = _admin;
+pub fn unfreeze_account(e: &Env, admin: Address, target: Address) {
     if !e.storage().persistent().get::<DataKey, bool>(&DataKey::Freeze(target.clone())).unwrap_or(false) {
         panic!("NotFrozen: account is not frozen");
     }
