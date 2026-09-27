@@ -29,6 +29,8 @@ pub enum DataKey {
     // --- Compliance ----------------------------------------------------------
     /// Whether the whole contract is paused.
     Paused,
+    /// Whether token holders must be whitelisted.
+    WhitelistEnabled,
     /// Whether an account is frozen and cannot move tokens.
     Frozen(Address),
 
