@@ -196,6 +196,78 @@ impl VeriTixPay {
     pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
+
+    /// Sets the global dispute arbiter (resolver) used to settle disputes.
+    ///
+    /// Admin-only. Disputes need a designated resolver before any of them can
+    /// be settled.
+    pub fn set_arbiter(e: Env, admin: Address, arbiter: Address) {
+        crate::dispute::set_arbiter(&e, &admin, &arbiter);
+    }
+
+    /// The configured dispute arbiter.
+    ///
+    /// # Panics
+    ///
+    /// Panics with `ArbiterNotSet` when no arbiter has been configured.
+    pub fn get_arbiter(e: Env) -> Address {
+        crate::dispute::get_arbiter(&e)
+    }
+
+    // ---- Multi-escrow ---------------------------------------------------
+
+    /// Holds `total` of `token` split across `beneficiaries` and returns the
+    /// new record's id.
+    ///
+    /// `beneficiaries[i]` is owed `amounts[i]`; the two vectors must be the
+    /// same length and `amounts` must sum exactly to `total`.
+    pub fn create_multi_escrow(
+        e: Env,
+        depositor: Address,
+        token: Address,
+        beneficiaries: soroban_sdk::Vec<Address>,
+        amounts: soroban_sdk::Vec<i128>,
+        total: i128,
+    ) -> u64 {
+        crate::multi_escrow::create(&e, &depositor, &token, beneficiaries, amounts, total)
+    }
+
+    /// The full record for `multi_escrow_id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no multi-escrow exists at `multi_escrow_id`.
+    pub fn get_multi_escrow(e: Env, multi_escrow_id: u64) -> crate::storage_types::MultiEscrowRecord {
+        crate::multi_escrow::record(&e, multi_escrow_id)
+    }
+
+    /// Whether `multi_escrow_id` has been settled — released or refunded.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no multi-escrow exists at `multi_escrow_id`.
+    pub fn is_multi_escrow_settled(e: Env, multi_escrow_id: u64) -> bool {
+        crate::multi_escrow::is_settled(&e, multi_escrow_id)
+    }
+
+    /// Pays every beneficiary their stored amount and marks the record
+    /// `Released`. Settlement is atomic: a failure on any leg reverts the
+    /// whole call.
+    ///
+    /// Settlable by the depositor or the admin, and only while the record is
+    /// `Active`.
+    pub fn release_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
+        crate::multi_escrow::release(&e, &caller, multi_escrow_id);
+    }
+
+    /// Returns the whole deposit to the depositor and marks the record
+    /// `Refunded`.
+    ///
+    /// Settlable by the depositor or the admin, and only while the record is
+    /// `Active`.
+    pub fn refund_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
+        crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
+    }
 }
 
 #[cfg(test)]

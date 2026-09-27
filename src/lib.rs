@@ -38,9 +38,12 @@ use soroban_sdk as _;
 pub mod admin;
 pub mod contract;
 pub mod dispute;
+pub mod multi_escrow;
 pub mod storage_types;
 
 #[cfg(test)]
 mod admin_test;
 #[cfg(test)]
 mod dispute_test;
+#[cfg(test)]
+mod multi_escrow_test;

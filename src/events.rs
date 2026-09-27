@@ -78,3 +78,43 @@ pub struct EscrowRefunded {
     pub id: u32,
     pub amount: i128,
 }
+
+/// A dispute was raised over an escrow, freezing it until a ruling is final.
+///
+/// Topics are `["dispute_raised", claimant: Address]` and the data is
+/// `[escrow_id: u64]`. While the dispute is open the escrow must not be
+/// released or refunded.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeRaised {
+    #[topic]
+    pub claimant: Address,
+    pub escrow_id: u64,
+}
+
+/// A multi-beneficiary escrow was created.
+///
+/// Topics are `["multi_escrow_created", depositor: Address]` and the data is
+/// `[id: u64, total: i128]`.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiEscrowCreated {
+    #[topic]
+    pub depositor: Address,
+    pub id: u64,
+    pub total: i128,
+}
+
+/// A multi-beneficiary escrow was fully released.
+///
+/// Topics are `["multi_escrow_released", depositor: Address]` and the data is
+/// `[id: u64, total: i128]`. Atomic settlement means there is no partial
+/// state to report: every beneficiary was paid.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiEscrowReleased {
+    #[topic]
+    pub depositor: Address,
+    pub id: u64,
+    pub total: i128,
+}
