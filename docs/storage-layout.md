@@ -10,10 +10,10 @@ do not hand-build a storage key from a tuple or a string.
 
 ## Durability tiers
 
-| Tier | Bounded by | Holds |
-|---|---|---|
-| **Instance** | The contract's storage footprint, restored wholesale if the contract is archived | Fixed configuration: who the admin is, total supply, the supply cap |
-| **Persistent** | Grows with usage; each entry archived independently once its TTL lapses | Per-account and per-record data: balances, allowances, counters, escrows, splits, schedules, disputes |
+| Tier           | Bounded by                                                                       | Holds                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Instance**   | The contract's storage footprint, restored wholesale if the contract is archived | Fixed configuration: who the admin is, total supply, the supply cap                                   |
+| **Persistent** | Grows with usage; each entry archived independently once its TTL lapses          | Per-account and per-record data: balances, allowances, counters, escrows, splits, schedules, disputes |
 
 Instance storage is cheap to read and is restored as a unit, so it is reserved
 for a small fixed set of configuration values. Anything whose count grows with
@@ -21,26 +21,30 @@ the number of users belongs in persistent storage.
 
 ## Key reference
 
-| `DataKey` variant | Value type | Durability | Owning module | Notes |
-|---|---|---|---|---|
-| `Admin` | `Address` | Instance | `admin` | Set once at initialization. Panics on re-initialization. |
-| `PendingAdmin` | `Address` | Instance | `admin` | Nominee during a two-step ownership transfer. Absent when no transfer is in flight. |
-| `AdminActiveAfterLedger` | `u32` | Instance | `admin` | Ledger from which `PendingAdmin` becomes `Admin`. |
-| `ClawbackCosigner` | `Address` | Instance | `admin` | Second signer a clawback requires alongside the admin. |
-| `TotalSupply` | `i128` | Instance | `balance` | Tokens in circulation, net of burns. |
-| `MaxSupply` | `i128` | Instance | `balance` | Hard cap fixed at initialization. Absent when the token is uncapped. |
-| `Balance(Address)` | `i128` | Persistent | `balance` | Token balance of one account. |
-| `Allowance(Address, Address)` | `(i128, u32)` | Persistent | `allowance` | Amount approved by the first address for the second, and the ledger it expires at. |
-| `Counter(Address)` | `u32` | Persistent | `counter` | Monotonic per-address counter. |
+| `DataKey` variant             | Value type    | Durability | Owning module | Notes                                                                               |
+| ----------------------------- | ------------- | ---------- | ------------- | ----------------------------------------------------------------------------------- |
+| `Admin`                       | `Address`     | Instance   | `admin`       | Set once at initialization. Panics on re-initialization.                            |
+| `PendingAdmin`                | `Address`     | Instance   | `admin`       | Nominee during a two-step ownership transfer. Absent when no transfer is in flight. |
+| `AdminActiveAfterLedger`      | `u32`         | Instance   | `admin`       | Ledger from which `PendingAdmin` becomes `Admin`.                                   |
+| `ClawbackCosigner`            | `Address`     | Instance   | `admin`       | Second signer a clawback requires alongside the admin.                              |
+| `TotalSupply`                 | `i128`        | Instance   | `balance`     | Tokens in circulation, net of burns.                                                |
+| `MaxSupply`                   | `i128`        | Instance   | `balance`     | Hard cap fixed at initialization. Absent when the token is uncapped.                |
+| `Balance(Address)`            | `i128`        | Persistent | `balance`     | Token balance of one account.                                                       |
+| `Allowance(Address, Address)` | `(i128, u32)` | Persistent | `allowance`   | Amount approved by the first address for the second, and the ledger it expires at.  |
+| `Counter(Address)`            | `u32`         | Persistent | `counter`     | Monotonic per-address counter.                                                      |
 
 Record types that are stored under keys added by later issues:
 
-| Record | Key | Value type | Durability | Owning module |
-|---|---|---|---|---|
-| `EscrowRecord` | `Escrow(u64)` | `EscrowRecord` | Persistent | `escrow` |
-| `SplitRecord` | `Split(u64)` | `SplitRecord` | Persistent | `splitter` |
-| `RecurringPayment` | `Recurring(u64)` | `RecurringPayment` | Persistent | `recurring` |
-| `DisputeRecord` | `Dispute(u64)` | `DisputeRecord` | Persistent | `dispute` |
+| Record                      | Key                     | Value type                | Durability | Owning module |
+| --------------------------- | ----------------------- | ------------------------- | ---------- | ------------- |
+| `EscrowRecord`              | `Escrow(u64)`           | `EscrowRecord`            | Persistent | `escrow`      |
+| `SplitRecord`               | `Split(u64)`            | `SplitRecord`             | Persistent | `splitter`    |
+| `RecurringPayment`          | `Recurring(u64)`        | `RecurringPayment`        | Persistent | `recurring`   |
+| Recurring execution history | `RecurringHistory(u64)` | `Vec<RecurringExecution>` | Persistent | `recurring`   |
+| `DisputeRecord`             | `Dispute(u64)`          | `DisputeRecord`           | Persistent | `dispute`     |
+
+Recurring execution history retains at most 100 charges per schedule. When a
+new successful charge is recorded at capacity, the oldest entry is discarded.
 
 The `Escrow`, `Split`, `Recurring`, and `Dispute` key variants are added by the
 issues that introduce those modules. They are listed here so the intended
@@ -57,9 +61,9 @@ balance that reads as zero is indistinguishable from a drained account.
 Two helpers in `src/storage_types.rs` implement the policy. Both are the only
 supported way to extend an entry's life.
 
-| Helper | Applies to | Threshold | Extends by |
-|---|---|---|---|
-| `bump_instance(e)` | Instance storage | `INSTANCE_LIFETIME_THRESHOLD` (518,400 ledgers, ~30 days) | `INSTANCE_BUMP_AMOUNT` (2,592,000 ledgers, ~15 days) |
+| Helper                     | Applies to           | Threshold                                                      | Extends by                                              |
+| -------------------------- | -------------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
+| `bump_instance(e)`         | Instance storage     | `INSTANCE_LIFETIME_THRESHOLD` (518,400 ledgers, ~30 days)      | `INSTANCE_BUMP_AMOUNT` (2,592,000 ledgers, ~15 days)    |
 | `bump_persistent(e, &key)` | One persistent entry | `PERSISTENT_LIFETIME_THRESHOLD` (2,073,600 ledgers, ~120 days) | `PERSISTENT_BUMP_AMOUNT` (4,752,000 ledgers, ~180 days) |
 
 Ledger figures assume Stellar's 5-second ledger close.
