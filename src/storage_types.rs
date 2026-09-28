@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Vec};
 
 /// Every persistent storage key the contract owns.
 ///
@@ -47,6 +47,12 @@ pub enum DataKey {
     Split(u64),
     /// The dispute record open over an escrow, keyed by escrow id.
     Dispute(u64),
+    /// The globally configured dispute arbiter (resolver).
+    Arbiter,
+    /// A multi-beneficiary escrow held under its id.
+    MultiEscrow(u64),
+    /// Number of multi-escrows created so far (also the next id).
+    MultiEscrowCount,
 
     // --- Counters ------------------------------------------------------------
     /// A monotonically increasing per-address counter.
@@ -62,6 +68,8 @@ pub enum DataKey {
 pub enum EscrowStatus {
     /// Funds are still held and the escrow can still be settled.
     Active,
+    /// Frozen by an open dispute; release and refund must panic while set.
+    Disputed,
     /// Settled in the beneficiary's favour.
     Released,
     /// Settled in the depositor's favour.
@@ -181,4 +189,39 @@ pub struct DisputeRecord {
     /// True once an appeal has been resolved. The ruling is then final and a
     /// second appeal on the same escrow must be rejected.
     pub is_final: bool,
+}
+
+/// Where a multi-beneficiary escrow is in its lifecycle.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MultiEscrowStatus {
+    /// Funds are still held and the record can still be settled.
+    Active,
+    /// Every beneficiary was paid and the record is drained to zero.
+    Released,
+    /// The full deposit was returned to the depositor.
+    Refunded,
+}
+
+/// One multi-beneficiary escrow: a single deposit split across many payees.
+///
+/// `beneficiaries[i]` is owed `amounts[i]`; the two vectors are always the
+/// same length, and `amounts` always sums to `total` at creation. Settlement
+/// is atomic — either every leg is paid or the whole call reverts — so a
+/// partial payout can never strand the record.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiEscrowRecord {
+    /// Who funded the escrow and receives it back on refund.
+    pub depositor: Address,
+    /// The token being held.
+    pub token: Address,
+    /// One entry per beneficiary, parallel to `amounts`.
+    pub beneficiaries: Vec<Address>,
+    /// One entry per beneficiary, parallel to `beneficiaries`.
+    pub amounts: Vec<i128>,
+    /// The full deposited total; `amounts` must sum to it at creation.
+    pub total: i128,
+    /// Current lifecycle state.
+    pub status: MultiEscrowStatus,
 }

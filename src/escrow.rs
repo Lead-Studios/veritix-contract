@@ -95,8 +95,25 @@ pub fn is_settled(e: &Env, id: u32) -> bool {
     is_settled_status(&record(e, id).status)
 }
 
+/// Panics while an open dispute freezes the escrow.
+///
+/// A buyer who did not get into the event must be able to stop the organizer
+/// being paid: once `raise_dispute` opens a dispute over the escrow, neither
+/// release nor refund may move funds until a ruling is final.
+fn require_no_open_dispute(e: &Env, id: u32) {
+    if crate::dispute::is_dispute_open(e, id as u64) {
+        panic!(
+            "EscrowDisputed: escrow {} is frozen by an open dispute",
+            id
+        );
+    }
+}
+
 /// Panics unless `record` is still `Active`.
 fn require_active(id: u32, record: &EscrowRecord) {
+    if record.status == EscrowStatus::Disputed {
+        panic!("EscrowDisputed: escrow {} is frozen by an open dispute", id);
+    }
     if is_settled_status(&record.status) {
         panic!(
             "EscrowNotActive: escrow {} is already {:?}",
@@ -189,6 +206,7 @@ pub fn create(
 /// Pays the beneficiary everything still held and closes the escrow as
 /// `Released`.
 pub fn release(e: &Env, caller: &Address, id: u32) {
+    require_no_open_dispute(e, id);
     let mut record = record(e, id);
     require_active(id, &record);
     require_settlement_authority(e, caller, &record);
@@ -217,6 +235,7 @@ pub fn release(e: &Env, caller: &Address, id: u32) {
 /// Panics with `EscrowNotActive` when the escrow has already been settled, so a
 /// refund can never race a release into paying the same funds twice.
 pub fn refund(e: &Env, caller: &Address, id: u32) {
+    require_no_open_dispute(e, id);
     let mut record = record(e, id);
     require_active(id, &record);
     require_settlement_authority(e, caller, &record);
@@ -252,6 +271,7 @@ pub fn refund(e: &Env, caller: &Address, id: u32) {
 /// whatever the token contract raises on a failed transfer.
 pub fn release_partial(e: &Env, caller: &Address, id: u32, amount: i128) {
     require_positive_amount(amount);
+    require_no_open_dispute(e, id);
     let mut record = record(e, id);
     require_active(id, &record);
     require_settlement_authority(e, caller, &record);
