@@ -43,8 +43,10 @@ pub enum DataKey {
     // --- Escrows and disputes ------------------------------------------------
     /// An escrow held under its id, for lifecycle and settlement tracking.
     Escrow(u64),
-    /// A payment split held under its id.
+/// A payment split held under its id.
     Split(u64),
+    /// The retained execution history for a recurring schedule.
+    RecurringHistory(u64),
     /// The dispute record open over an escrow, keyed by escrow id.
     Dispute(u64),
 
@@ -131,6 +133,16 @@ pub struct RecurringPayment {
     pub active: bool,
     /// Whether the schedule is temporarily suspended. Survives resume.
     pub paused: bool,
+}
+
+/// One successful recurring charge, recorded for dispute review.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringExecution {
+    /// Ledger at which the charge succeeded.
+    pub ledger: u32,
+    /// Amount charged, in the token's base unit.
+    pub amount: i128,
 }
 
 /// Lifecycle state of a dispute over an escrow.
