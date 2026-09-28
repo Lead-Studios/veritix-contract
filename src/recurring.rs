@@ -9,6 +9,103 @@ use crate::validation::require_positive_amount;
 /// Maximum number of successful charges retained for each schedule.
 pub const MAX_RECURRING_HISTORY: u32 = 100;
 
+/// Creates a recurring schedule and indexes it for both participants.
+pub fn create(
+    e: &Env,
+    payer: &soroban_sdk::Address,
+    payee: &soroban_sdk::Address,
+    token: &soroban_sdk::Address,
+    amount: i128,
+    interval_ledgers: u32,
+) -> u64 {
+    payer.require_auth();
+    require_positive_amount(amount);
+    if interval_ledgers == 0 {
+        panic!("RecurringIntervalInvalid: interval must be positive");
+    }
+
+    let next_execution = e
+        .ledger()
+        .sequence()
+        .checked_add(interval_ledgers)
+        .unwrap_or_else(|| panic!("RecurringLedgerOverflow: next execution ledger overflows"));
+    let id: u64 = e
+        .storage()
+        .persistent()
+        .get(&DataKey::RecurringCount)
+        .unwrap_or(0);
+    let next_id = id
+        .checked_add(1)
+        .unwrap_or_else(|| panic!("RecurringIdOverflow: schedule id overflows"));
+    let schedule = RecurringPayment {
+        payer: payer.clone(),
+        payee: payee.clone(),
+        token: token.clone(),
+        amount,
+        interval_ledgers,
+        next_execution,
+        active: true,
+        paused: false,
+    };
+
+    e.storage()
+        .persistent()
+        .set(&DataKey::Recurring(id), &schedule);
+    e.storage()
+        .persistent()
+        .set(&DataKey::RecurringCount, &next_id);
+
+    let mut payer_ids = recurring_ids_for_payer(e, payer);
+    payer_ids.push_back(id);
+    e.storage()
+        .persistent()
+        .set(&DataKey::PayerRecurrings(payer.clone()), &payer_ids);
+
+    let mut payee_ids = recurring_ids_for_payee(e, payee);
+    payee_ids.push_back(id);
+    e.storage()
+        .persistent()
+        .set(&DataKey::PayeeRecurrings(payee.clone()), &payee_ids);
+
+    id
+}
+
+/// Returns all schedules created by `payer`.
+pub fn get_recurring_by_payer(e: &Env, payer: &soroban_sdk::Address) -> Vec<RecurringPayment> {
+    let ids = recurring_ids_for_payer(e, payer);
+    let mut schedules = Vec::new(e);
+    for id in ids {
+        if let Some(schedule) = e
+            .storage()
+            .persistent()
+            .get::<_, RecurringPayment>(&DataKey::Recurring(id))
+        {
+            schedules.push_back(schedule);
+        }
+    }
+    schedules
+}
+
+fn recurring_ids_for_payer(e: &Env, payer: &soroban_sdk::Address) -> Vec<u64> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::PayerRecurrings(payer.clone()))
+        .unwrap_or_else(|| Vec::new(e))
+}
+
+/// Returns the recurring schedule ids associated with `payee`.
+pub fn recurring_ids_for_payee(e: &Env, payee: &soroban_sdk::Address) -> Vec<u64> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::PayeeRecurrings(payee.clone()))
+        .unwrap_or_else(|| Vec::new(e))
+}
+
+/// Returns the number of schedules indexed for `payee`.
+pub fn recurring_count_for_payee(e: &Env, payee: &soroban_sdk::Address) -> u32 {
+    recurring_ids_for_payee(e, payee).len()
+}
+
 /// Pulls one due interval from the payer and schedules the next interval.
 ///
 /// # Panics

@@ -47,10 +47,16 @@ pub enum DataKey {
     Split(u64),
     /// The retained execution history for a recurring schedule.
     RecurringHistory(u64),
+    /// Recurring schedule ids indexed by payer.
+    PayerRecurrings(Address),
+    /// Recurring schedule ids indexed by payee.
+    PayeeRecurrings(Address),
     /// The dispute record open over an escrow, keyed by escrow id.
     Dispute(u64),
 /// An authorised recurring payment, keyed by recurring payment id.
     Recurring(u64),
+    /// Number of recurring schedules created so far (also the next id).
+    RecurringCount,
     /// The globally configured dispute arbiter (resolver).
     Arbiter,
     /// A multi-beneficiary escrow held under its id.

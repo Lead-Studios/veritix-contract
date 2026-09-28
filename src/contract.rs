@@ -1,5 +1,5 @@
 use crate::metadata::{self, TokenMetadata};
-use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution};
+use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution, RecurringPayment};
 use crate::{admin, balance, escrow, recurring, whitelist};
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
@@ -199,6 +199,33 @@ impl VeriTixPay {
     /// The retained successful charge history for a recurring schedule.
     pub fn get_recurring_history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
         recurring::get_recurring_history(&e, recurring_id)
+    }
+
+    /// Creates a recurring schedule, authorising future charges from `payer`.
+    pub fn create_recurring(
+        e: Env,
+        payer: Address,
+        payee: Address,
+        token: Address,
+        amount: i128,
+        interval_ledgers: u32,
+    ) -> u64 {
+        recurring::create(&e, &payer, &payee, &token, amount, interval_ledgers)
+    }
+
+    /// All recurring schedules created by `payer`.
+    pub fn get_recurring_by_payer(e: Env, payer: Address) -> Vec<RecurringPayment> {
+        recurring::get_recurring_by_payer(&e, &payer)
+    }
+
+    /// Recurring schedule ids associated with `payee`.
+    pub fn recurring_ids_for_payee(e: Env, payee: Address) -> Vec<u64> {
+        recurring::recurring_ids_for_payee(&e, &payee)
+    }
+
+    /// Number of recurring schedules associated with `payee`.
+    pub fn recurring_count_for_payee(e: Env, payee: Address) -> u32 {
+        recurring::recurring_count_for_payee(&e, &payee)
     }
 
     /// The arbiter picks a winner: records the ruling and opens the appeal
