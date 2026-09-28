@@ -39,6 +39,7 @@ pub mod admin;
 pub mod contract;
 pub mod dispute;
 pub mod multi_escrow;
+pub mod recurring;
 pub mod splitter;
 pub mod storage_types;
 pub mod whitelist;
