@@ -1,6 +1,6 @@
 use crate::metadata::{self, TokenMetadata};
 use crate::storage_types::{DataKey, EscrowRecord};
-use crate::{admin, balance, escrow, whitelist};
+use crate::{admin, balance, escrow, recurring, whitelist};
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
 #[contract]
@@ -210,6 +210,11 @@ impl VeriTixPay {
     /// The final, unappealable ruling: settles the escrow and pays the winner.
     pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
+    }
+
+    /// Executes one due charge from an authorised recurring payment.
+    pub fn execute_recurring(e: Env, recurring_id: u64) {
+        recurring::execute_recurring(&e, recurring_id);
     }
 }
 

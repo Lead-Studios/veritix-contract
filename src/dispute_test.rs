@@ -222,6 +222,55 @@ fn resolve_dispute_finalizes_after_the_window_and_pays_the_winner() {
 }
 
 #[test]
+#[should_panic(expected = "DisputeAlreadyOpen")]
+fn raise_dispute_after_final_resolution_is_rejected() {
+    let (e, cid, resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_full(&e, &cid, &client, &resolver, &depositor, &beneficiary, id);
+
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+    let ruling = e.ledger().sequence();
+    jump(&e, ruling + APPEAL_WINDOW_LEDGERS + 1);
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+
+    client.raise_dispute(&depositor, &id, &None);
+}
+
+#[test]
+#[should_panic(expected = "DisputeFinal")]
+fn resolve_dispute_after_final_resolution_is_rejected() {
+    let (e, cid, resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_full(&e, &cid, &client, &resolver, &depositor, &beneficiary, id);
+
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+    let ruling = e.ledger().sequence();
+    jump(&e, ruling + APPEAL_WINDOW_LEDGERS + 1);
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+}
+
+#[test]
+#[should_panic(expected = "DisputeNotOpen")]
+fn expired_dispute_cannot_be_resolved() {
+    let (e, cid, resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_full(&e, &cid, &client, &resolver, &depositor, &beneficiary, id);
+    e.as_contract(&cid, || {
+        let mut record = e
+            .storage()
+            .persistent()
+            .get::<_, DisputeRecord>(&DataKey::Dispute(id))
+            .unwrap();
+        record.status = DisputeStatus::Expired;
+        e.storage().persistent().set(&DataKey::Dispute(id), &record);
+    });
+
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+}
+
+#[test]
 #[should_panic(expected = "Unauthorized: caller is not the assigned resolver")]
 fn resolve_dispute_rejects_a_stranger_resolver() {
     let (e, cid, _resolver, depositor, beneficiary, id) = setup();
