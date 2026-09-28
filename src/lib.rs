@@ -38,6 +38,7 @@ use soroban_sdk as _;
 pub mod admin;
 pub mod contract;
 pub mod dispute;
+pub mod multi_escrow;
 pub mod recurring;
 pub mod splitter;
 pub mod storage_types;
@@ -47,3 +48,5 @@ pub mod whitelist;
 mod admin_test;
 #[cfg(test)]
 mod dispute_test;
+#[cfg(test)]
+mod multi_escrow_test;

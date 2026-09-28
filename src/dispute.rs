@@ -77,7 +77,35 @@ fn write_escrow(e: &Env, escrow_id: u64, record: &EscrowRecord) {
     bump_persistent(e, &key);
 }
 
+/// The globally configured dispute arbiter (resolver).
+///
+/// Disputes need a designated resolver before any of them can be settled.
+/// Set once by the admin; individual disputes may still carry their own
+/// per-dispute `resolver`, which takes precedence when present.
+pub fn set_arbiter(e: &Env, admin: &Address, arbiter: &Address) {
+    crate::admin::check_admin(e, admin);
+    e.storage().persistent().set(&DataKey::Arbiter, arbiter);
+}
+
+/// The configured arbiter.
+///
+/// # Panics
+///
+/// With `ArbiterNotSet` when no arbiter has been configured yet.
+pub fn get_arbiter(e: &Env) -> Address {
+    e.storage()
+        .persistent()
+        .get(&DataKey::Arbiter)
+        .unwrap_or_else(|| panic!("ArbiterNotSet: no dispute arbiter configured"))
+}
+
 /// Raised the dispute over `escrow_id`, freezing it until a ruling is final.
+///
+/// The caller must be a party to the escrow (the depositor or the
+/// beneficiary) and the escrow must still be `Active`. Raising stores a
+/// `DisputeRecord`, marks the escrow `Disputed`, and emits a `DisputeRaised`
+/// event. While the dispute is open, release and refund must panic (see
+/// `is_dispute_open`).
 ///
 /// More than one dispute over the same escrow would let a second claimant
 /// double-freeze an escrow that has already been settled by a ruling, so a
@@ -85,7 +113,10 @@ fn write_escrow(e: &Env, escrow_id: u64, record: &EscrowRecord) {
 ///
 /// # Panics
 ///
-/// With `DisputeAlreadyOpen` when a dispute already exists for `escrow_id`.
+/// With `DisputeAlreadyOpen` when a dispute already exists for `escrow_id`,
+/// with `EscrowNotFound` for an unknown escrow, with `EscrowNotActive` unless
+/// the escrow is `Active`, and with `Unauthorized` when the caller is neither
+/// the depositor nor the beneficiary.
 pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u64, resolver: Option<Address>) {
     if e.storage()
         .persistent()
@@ -98,6 +129,19 @@ pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u64, resolver: Opti
         );
     }
     claimant.require_auth();
+    let mut escrow = read_escrow(e, escrow_id);
+    if escrow.status != EscrowStatus::Active {
+        panic!(
+            "EscrowNotActive: escrow {} is {:?}, not Active",
+            escrow_id, escrow.status
+        );
+    }
+    if claimant != &escrow.depositor && claimant != &escrow.beneficiary {
+        panic!(
+            "Unauthorized: only the depositor or the beneficiary may dispute escrow {}",
+            escrow_id
+        );
+    }
     let record = DisputeRecord {
         claimant: claimant.clone(),
         escrow_id,
@@ -109,6 +153,13 @@ pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u64, resolver: Opti
         is_final: false,
     };
     write_dispute(e, escrow_id, &record);
+    escrow.status = EscrowStatus::Disputed;
+    write_escrow(e, escrow_id, &escrow);
+    crate::events::DisputeRaised {
+        claimant: claimant.clone(),
+        escrow_id,
+    }
+    .publish(e);
 }
 
 /// Whether a dispute on `escrow_id` is still live.

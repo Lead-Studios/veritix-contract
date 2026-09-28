@@ -182,10 +182,12 @@ fn resolve_dispute_records_ruling_and_blocks_payout_until_window_lapses() {
     assert_eq!(record.winner, Some(beneficiary.clone()));
     assert!(!record.is_final);
 
-    // Payout is blocked: nothing moved, the escrow is still active and locked.
+    // Payout is blocked: nothing moved, the escrow is still locked.
+    // The escrow was marked `Disputed` on raise and stays frozen through the
+    // first ruling; only a final ruling settles it.
     assert_eq!(balance_of(&e, &cid, &beneficiary), 0);
     assert_eq!(escrow_locked(&e, &cid, &depositor), 100);
-    assert_eq!(escrow_status(&e, &cid, id), EscrowStatus::Active);
+    assert_eq!(escrow_status(&e, &cid, id), EscrowStatus::Disputed);
 }
 
 #[test]
