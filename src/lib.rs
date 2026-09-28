@@ -38,6 +38,7 @@ use soroban_sdk as _;
 pub mod admin;
 pub mod contract;
 pub mod dispute;
+pub mod splitter;
 pub mod storage_types;
 pub mod whitelist;
 

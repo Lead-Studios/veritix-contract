@@ -43,6 +43,8 @@ pub enum DataKey {
     // --- Escrows and disputes ------------------------------------------------
     /// An escrow held under its id, for lifecycle and settlement tracking.
     Escrow(u64),
+    /// A payment split held under its id.
+    Split(u64),
     /// The dispute record open over an escrow, keyed by escrow id.
     Dispute(u64),
 
