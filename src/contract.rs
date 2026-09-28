@@ -1,7 +1,7 @@
 use crate::metadata::{self, TokenMetadata};
-use crate::storage_types::{DataKey, EscrowRecord};
+use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution};
 use crate::{admin, balance, escrow, recurring, whitelist};
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
 pub struct VeriTixPay;
@@ -194,6 +194,11 @@ impl VeriTixPay {
     /// The dispute record for `escrow_id`.
     pub fn get_dispute(e: Env, escrow_id: u64) -> crate::storage_types::DisputeRecord {
         crate::dispute::get_dispute(&e, escrow_id)
+    }
+
+    /// The retained successful charge history for a recurring schedule.
+    pub fn get_recurring_history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
+        recurring::get_recurring_history(&e, recurring_id)
     }
 
     /// The arbiter picks a winner: records the ruling and opens the appeal

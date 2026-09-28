@@ -1,10 +1,13 @@
-//! Execution of authorised recurring charges.
+//! Execution of authorised recurring charges and retained execution history.
 
-use soroban_sdk::Env;
+use soroban_sdk::{Env, Vec};
 
 use crate::balance;
-use crate::storage_types::{DataKey, RecurringPayment};
+use crate::storage_types::{DataKey, RecurringExecution, RecurringPayment};
 use crate::validation::require_positive_amount;
+
+/// Maximum number of successful charges retained for each schedule.
+pub const MAX_RECURRING_HISTORY: u32 = 100;
 
 /// Pulls one due interval from the payer and schedules the next interval.
 ///
@@ -49,12 +52,43 @@ pub fn execute_recurring(e: &Env, recurring_id: u64) {
     e.storage().persistent().set(&key, &schedule);
 }
 
+/// Records a successful charge, keeping only the newest entries.
+///
+/// Call this only after the token transfer has succeeded.
+pub fn record_execution(e: &Env, recurring_id: u64, amount: i128) {
+    let key = DataKey::RecurringHistory(recurring_id);
+    let mut history = e
+        .storage()
+        .persistent()
+        .get::<_, Vec<RecurringExecution>>(&key)
+        .unwrap_or_else(|| Vec::new(e));
+
+    while history.len() >= MAX_RECURRING_HISTORY {
+        history.remove(0);
+    }
+    history.push_back(RecurringExecution {
+        ledger: e.ledger().sequence(),
+        amount,
+    });
+    e.storage().persistent().set(&key, &history);
+}
+
+/// Returns the retained successful charge history for `recurring_id`.
+///
+/// Returns an empty vector if no charge has been recorded for the schedule.
+pub fn get_recurring_history(e: &Env, recurring_id: u64) -> Vec<RecurringExecution> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::RecurringHistory(recurring_id))
+        .unwrap_or_else(|| Vec::new(e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::balance::balance_of;
     use soroban_sdk::testutils::{Address as _, Ledger, LedgerInfo};
-    use soroban_sdk::{Address, Env};
+    use soroban_sdk::{contract, contractimpl, Address, Env};
 
     fn setup(
         next_execution: u32,
@@ -134,5 +168,36 @@ mod tests {
     fn insufficient_payer_balance_is_rejected() {
         let (e, contract_id, _, _) = setup(100, true, false, 24);
         e.as_contract(&contract_id, || execute_recurring(&e, 1));
+    }
+
+    #[contract]
+    pub struct HistoryHarness;
+
+    #[contractimpl]
+    impl HistoryHarness {
+        pub fn record(e: Env, recurring_id: u64, amount: i128) {
+            record_execution(&e, recurring_id, amount);
+        }
+
+        pub fn history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
+            get_recurring_history(&e, recurring_id)
+        }
+    }
+
+    #[test]
+    fn history_retains_only_the_newest_executions() {
+        let e = Env::default();
+        let contract_id = e.register_contract(None, HistoryHarness);
+        let client = HistoryHarnessClient::new(&e, &contract_id);
+
+        assert_eq!(client.history(&9).len(), 0);
+        for amount in 0..=MAX_RECURRING_HISTORY {
+            client.record(&9, &(amount as i128));
+        }
+
+        let history = client.history(&9);
+        assert_eq!(history.len(), MAX_RECURRING_HISTORY);
+        assert_eq!(history.get(0).unwrap().amount, 1);
+        assert_eq!(history.get(MAX_RECURRING_HISTORY - 1).unwrap().amount, 100);
     }
 }
