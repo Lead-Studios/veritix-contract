@@ -1,6 +1,6 @@
 use crate::metadata::{self, TokenMetadata};
 use crate::storage_types::{DataKey, EscrowRecord};
-use crate::{admin, balance, escrow};
+use crate::{admin, balance, escrow, whitelist};
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
 #[contract]
@@ -62,6 +62,21 @@ impl VeriTixPay {
     /// Ledger on which the contract was initialized, 0 when it never was.
     pub fn initialized_at_ledger(e: Env) -> u32 {
         admin::initialized_at_ledger(&e)
+    }
+
+    /// Enables whitelist enforcement. Admin-only.
+    pub fn enable_whitelist(e: Env, admin_addr: Address) {
+        whitelist::enable_whitelist(&e, &admin_addr);
+    }
+
+    /// Disables whitelist enforcement. Admin-only.
+    pub fn disable_whitelist(e: Env, admin_addr: Address) {
+        whitelist::disable_whitelist(&e, &admin_addr);
+    }
+
+    /// Whether whitelist enforcement is enabled.
+    pub fn is_whitelist_enabled(e: Env) -> bool {
+        whitelist::is_whitelist_enabled(&e)
     }
 
     /// The token name.

@@ -39,6 +39,7 @@ pub mod admin;
 pub mod contract;
 pub mod dispute;
 pub mod storage_types;
+pub mod whitelist;
 
 #[cfg(test)]
 mod admin_test;
