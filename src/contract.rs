@@ -217,6 +217,11 @@ impl VeriTixPay {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
+/// Executes one due charge from an authorised recurring payment.
+    pub fn execute_recurring(e: Env, recurring_id: u64) {
+        recurring::execute_recurring(&e, recurring_id);
+    }
+
     /// Sets the global dispute arbiter (resolver) used to settle disputes.
     ///
     /// Admin-only. Disputes need a designated resolver before any of them can

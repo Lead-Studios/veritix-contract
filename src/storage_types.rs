@@ -49,6 +49,8 @@ pub enum DataKey {
     RecurringHistory(u64),
     /// The dispute record open over an escrow, keyed by escrow id.
     Dispute(u64),
+/// An authorised recurring payment, keyed by recurring payment id.
+    Recurring(u64),
     /// The globally configured dispute arbiter (resolver).
     Arbiter,
     /// A multi-beneficiary escrow held under its id.
