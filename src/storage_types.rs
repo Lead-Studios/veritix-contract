@@ -55,6 +55,8 @@ pub enum DataKey {
     // --- Escrows and disputes ------------------------------------------------
     /// An escrow held under its id, for lifecycle and settlement tracking.
     Escrow(u64),
+    /// Escrow record keyed by its id.
+    EscrowRecord(u32),
     /// Number of escrows created so far (also the next escrow id).
     EscrowCount,
     /// Total token amount still held across all active escrows.
