@@ -1,5 +1,4 @@
-use crate::control;
-use crate::events::{Burn, Clawback, Mint, Transfer};
+use crate::events::{Mint, Transfer};
 use crate::storage_types::DataKey;
 use crate::validation::require_positive_amount;
 use soroban_sdk::{Address, Env};
@@ -112,6 +111,13 @@ pub fn mint(e: &Env, to: &Address, amount: i128) {
 /// Panics on a non-positive `amount` or when `from` holds less than `amount`.
 pub fn transfer(e: &Env, from: &Address, to: &Address, amount: i128) {
     require_positive_amount(amount);
+    crate::control::require_not_paused(e);
+    crate::control::require_not_frozen(e, from);
+    crate::control::require_not_frozen(e, to);
+    crate::authorization::require_authorized(e, from);
+    crate::authorization::require_authorized(e, to);
+    crate::whitelist::require_whitelisted(e, from);
+    crate::whitelist::require_whitelisted(e, to);
     debit(e, from, amount);
     credit(e, to, amount);
     Transfer {

@@ -196,7 +196,7 @@ pub fn revoke_all_allowances(e: &Env, owner: &Address) -> u32 {
 }
 
 /// Rejects a negative `amount`, allowing the zero that means "revoke".
-fn require_non_negative(amount: i128) -> () {
+fn require_non_negative(amount: i128) {
     assert!(
         amount >= 0,
         "InvalidAmount: amount must not be negative, got {}",

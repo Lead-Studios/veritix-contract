@@ -79,6 +79,21 @@ impl VeriTixPay {
         whitelist::is_whitelist_enabled(&e)
     }
 
+    /// Adds `account` to the whitelist. Admin-only.
+    pub fn add_to_whitelist(e: Env, admin_addr: Address, account: Address) {
+        whitelist::add_to_whitelist(&e, &admin_addr, &account);
+    }
+
+    /// Removes `account` from the whitelist. Admin-only.
+    pub fn remove_from_whitelist(e: Env, admin_addr: Address, account: Address) {
+        whitelist::remove_from_whitelist(&e, &admin_addr, &account);
+    }
+
+    /// Whether `account` is whitelisted.
+    pub fn is_whitelisted(e: Env, account: Address) -> bool {
+        whitelist::is_whitelisted(&e, &account)
+    }
+
     /// The token name.
     pub fn name(e: Env) -> String {
         metadata::load(&e).name
@@ -252,6 +267,16 @@ impl VeriTixPay {
     /// The retained successful charge history for a recurring schedule.
     pub fn get_recurring_history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
         recurring::get_recurring_history(&e, recurring_id)
+    }
+
+    /// Reads a recurring schedule by id.
+    pub fn get_recurring(e: Env, recurring_id: u64) -> RecurringPayment {
+        recurring::get_recurring(&e, recurring_id)
+    }
+
+    /// Whether the recurring schedule at `recurring_id` is active and not paused.
+    pub fn is_recurring_active(e: Env, recurring_id: u64) -> bool {
+        recurring::is_recurring_active(&e, recurring_id)
     }
 
     /// Creates a recurring schedule, authorising future charges from `payer`.
