@@ -42,6 +42,8 @@ pub mod balance;
 pub mod contract;
 pub mod control;
 pub mod dispute;
+pub mod dispute_stats;
+pub mod emergency;
 pub mod escrow;
 pub mod events;
 pub mod fee;
@@ -53,6 +55,8 @@ pub mod splitter;
 pub mod storage_types;
 pub mod validation;
 pub mod whitelist;
+pub mod whitelist_batch;
+pub mod whitelist_signed;
 
 #[cfg(test)]
 mod admin_test;

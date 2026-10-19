@@ -87,10 +87,14 @@ pub enum DataKey {
     MultiEscrow(u64),
     /// Number of multi-escrows created so far (also the next id).
     MultiEscrowCount,
-    /// Protocol fee in basis points (e.g. 100 bps = 1%).
-    ProtocolFeeBps,
-    /// Protocol fee treasury address receiving collected fees.
-    ProtocolFeeTreasury,
+    /// Whether an account is whitelisted.
+    Whitelisted(Address),
+    /// Monotonically increasing counter / nonce per address.
+    Counter(Address),
+    /// Dispute escrow ids indexed by claimant.
+    ClaimantDisputes(Address),
+    /// All escrow ids that have a dispute.
+    DisputeIds,
 }
 
 /// Where an escrow is in its lifecycle.
