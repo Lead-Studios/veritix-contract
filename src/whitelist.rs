@@ -3,9 +3,12 @@ use crate::storage_types::DataKey;
 use soroban_sdk::{Address, Env};
 
 /// Whether whitelist enforcement is enabled. Unset storage defaults to false.
+///
+/// Contract-wide configuration, so it lives in instance storage with the admin
+/// and the supply counters (see `docs/ttl.md`).
 pub fn is_whitelist_enabled(e: &Env) -> bool {
 	e.storage()
-		.persistent()
+		.instance()
 		.get(&DataKey::WhitelistEnabled)
 		.unwrap_or(false)
 }
@@ -14,7 +17,7 @@ pub fn is_whitelist_enabled(e: &Env) -> bool {
 pub fn enable_whitelist(e: &Env, admin_addr: &Address) {
 	admin::check_admin(e, admin_addr);
 	e.storage()
-		.persistent()
+		.instance()
 		.set(&DataKey::WhitelistEnabled, &true);
 }
 
@@ -22,7 +25,7 @@ pub fn enable_whitelist(e: &Env, admin_addr: &Address) {
 pub fn disable_whitelist(e: &Env, admin_addr: &Address) {
 	admin::check_admin(e, admin_addr);
 	e.storage()
-		.persistent()
+		.instance()
 		.set(&DataKey::WhitelistEnabled, &false);
 }
 

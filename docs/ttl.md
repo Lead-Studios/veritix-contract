@@ -13,11 +13,18 @@ Ledger figures assume a 5-second ledger close.
 
 ## Where state lives
 
-Currently the admin key, balances and all records are stored in **persistent** storage (`env.storage().persistent()`), not instance storage. Instance storage is not used for the admin.
+The contract-wide configuration keys — `Admin`, `InitializedAtLedger`, `Paused`,
+`WhitelistEnabled`, `TotalSupply` and `MaxSupply` — live in **instance**
+storage. Everything that grows with usage — balances, allowances, escrows,
+schedules, disputes — is **persistent**.
 
 ## Current coverage
 
-`bump_persistent` is applied by the dispute module. Other modules do not yet call the helpers, so their entries are not extended on access. New code should call `bump_persistent` on every read and write of a persistent key.
+Every entry point begins with `bump_instance(e)`, so the instance TTL is
+extended on every call. `bump_persistent` is applied by the dispute module.
+Other modules do not yet call the helper, so their entries are not extended on
+access. New code should call `bump_persistent` on every read and write of a
+persistent key.
 
 ## Adding a key
 
