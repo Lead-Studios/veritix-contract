@@ -255,6 +255,16 @@ pub fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
     );
 }
 
+/// Pulls `amount` of `token` from `from` into the contract.
+pub fn collect(e: &Env, token_address: &Address, from: &Address, amount: i128) {
+    let contract = e.current_contract_address();
+    token::TokenClient::new(e, token_address).transfer(
+        from,
+        &contract,
+        &amount,
+    );
+}
+
 /// Holds `amount` of `token` for `beneficiary` and returns the new escrow's id.
 ///
 /// Funds leave the depositor's account immediately and only reach the
