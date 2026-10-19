@@ -320,9 +320,19 @@ impl VeriTixPay {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
-/// Executes one due charge from an authorised recurring payment.
+    /// Executes one due charge from an authorised recurring payment.
     pub fn execute_recurring(e: Env, recurring_id: u64) {
         recurring::execute_recurring(&e, recurring_id);
+    }
+
+    /// Pauses an active recurring schedule. Can be called by payer or payee.
+    pub fn pause_recurring(e: Env, caller: Address, recurring_id: u64) {
+        recurring::pause_recurring(&e, &caller, recurring_id);
+    }
+
+    /// Resumes a paused recurring schedule. Can be called by payer or payee.
+    pub fn resume_recurring(e: Env, caller: Address, recurring_id: u64) {
+        recurring::resume_recurring(&e, &caller, recurring_id);
     }
 
     /// Sets the global dispute arbiter (resolver) used to settle disputes.
