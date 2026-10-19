@@ -5,7 +5,7 @@
 //! atomic — either every leg is paid or the whole call reverts — so a
 //! beneficiary can never be skipped because a later leg failed.
 
-use crate::events::{MultiEscrowCreated, MultiEscrowReleased};
+use crate::events::{MultiEscrowCreated, MultiEscrowRefunded, MultiEscrowReleased};
 use crate::storage_types::{DataKey, MultiEscrowRecord, MultiEscrowStatus};
 use soroban_sdk::{token, Address, Env, Vec};
 
@@ -207,4 +207,11 @@ pub fn refund(e: &Env, caller: &Address, id: u64) {
     e.storage()
         .persistent()
         .set(&DataKey::MultiEscrow(id), &record);
+
+    MultiEscrowRefunded {
+        depositor: record.depositor.clone(),
+        id,
+        total: record.total,
+    }
+    .publish(e);
 }

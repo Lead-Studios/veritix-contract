@@ -130,6 +130,19 @@ pub struct MultiEscrowReleased {
     pub total: i128,
 }
 
+/// A multi-beneficiary escrow was refunded to its depositor.
+///
+/// Topics are `["multi_escrow_refunded", depositor: Address]` and the data is
+/// `[id: u64, total: i128]`.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiEscrowRefunded {
+    #[topic]
+    pub depositor: Address,
+    pub id: u64,
+    pub total: i128,
+}
+
 /// Tokens were burned from `from`.
 ///
 /// Topics are `["burn", from: Address]` and the data is `[amount: i128]`, the

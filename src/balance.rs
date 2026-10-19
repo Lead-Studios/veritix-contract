@@ -1,5 +1,4 @@
-use crate::control;
-use crate::events::{Burn, Clawback, Mint, Transfer};
+use crate::events::{Clawback, Mint, Transfer};
 use crate::storage_types::DataKey;
 use crate::validation::require_positive_amount;
 use soroban_sdk::{Address, Env};
@@ -27,6 +26,31 @@ pub fn balance_of(e: &Env, account: &Address) -> i128 {
 
 /// Credits `amount` to `account` without touching total supply.
 ///
+pub fn holders(e: &Env) -> soroban_sdk::Vec<Address> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::HolderSet)
+        .unwrap_or_else(|| soroban_sdk::Vec::new(e))
+}
+
+fn add_holder(e: &Env, account: &Address) {
+    let mut set = holders(e);
+    if !set.contains(account.clone()) {
+        set.push_back(account.clone());
+        e.storage().persistent().set(&DataKey::HolderSet, &set);
+    }
+}
+
+fn remove_holder(e: &Env, account: &Address) {
+    let mut set = holders(e);
+    if let Some(index) = set.first_index_of(account.clone()) {
+        set.remove(index);
+        e.storage().persistent().set(&DataKey::HolderSet, &set);
+    }
+}
+
+/// Credits `amount` to `account` without touching total supply.
+///
 /// Callers that bring new tokens into circulation must also call
 /// [`increase_supply`] so the two ledgers cannot drift apart.
 pub fn credit(e: &Env, account: &Address, amount: i128) {
@@ -36,6 +60,7 @@ pub fn credit(e: &Env, account: &Address, amount: i128) {
     e.storage()
         .persistent()
         .set(&DataKey::BalanceOf(account.clone()), &new_balance);
+    add_holder(e, account);
 }
 
 /// Debits `amount` from `account`.
@@ -53,6 +78,7 @@ pub fn debit(e: &Env, account: &Address, amount: i128) {
         e.storage()
             .persistent()
             .remove(&DataKey::BalanceOf(account.clone()));
+        remove_holder(e, account);
     } else {
         e.storage()
             .persistent()
@@ -97,6 +123,33 @@ pub fn mint(e: &Env, to: &Address, amount: i128) {
     credit(e, to, amount);
     Mint {
         to: to.clone(),
+        amount,
+    }
+    .publish(e);
+}
+
+/// Decreases total supply by `amount`.
+///
+/// # Panics
+///
+/// Panics with `SupplyUnderflow` if `amount` is greater than total supply.
+pub fn decrease_supply(e: &Env, amount: i128) {
+    let supply = total_supply(e);
+    let new_supply = supply
+        .checked_sub(amount)
+        .unwrap_or_else(|| panic!("SupplyUnderflow: clawback {} would reduce supply below 0", amount));
+    e.storage()
+        .persistent()
+        .set(&DataKey::TotalSupply, &new_supply);
+}
+
+/// Recovers `amount` from `from` on the admin's authority.
+pub fn clawback(e: &Env, from: &Address, amount: i128) {
+    require_positive_amount(amount);
+    debit(e, from, amount);
+    decrease_supply(e, amount);
+    Clawback {
+        from: from.clone(),
         amount,
     }
     .publish(e);

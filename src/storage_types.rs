@@ -27,6 +27,12 @@ pub enum DataKey {
     AllowanceSpenders(Address),
     /// The portion of an account's balance held by an active escrow.
     EscrowLocked(Address),
+    /// Every account that currently holds a positive balance.
+    HolderSet,
+    /// Balance snapshot taken for an address under a snapshot id.
+    Snapshot(u32, Address),
+    /// Total balance snapshotted under a snapshot id.
+    SnapshotTotal(u32),
 
     // --- Compliance ----------------------------------------------------------
     /// Whether the whole contract is paused.
@@ -55,6 +61,8 @@ pub enum DataKey {
     // --- Escrows and disputes ------------------------------------------------
     /// An escrow held under its id, for lifecycle and settlement tracking.
     Escrow(u64),
+    /// An escrow held under its id (u32).
+    EscrowRecord(u32),
     /// Number of escrows created so far (also the next escrow id).
     EscrowCount,
     /// Total token amount still held across all active escrows.

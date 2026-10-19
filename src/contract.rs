@@ -373,6 +373,32 @@ impl VeriTixPay {
     pub fn refund_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
         crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
     }
+
+    /// Admin-gated batch minting that returns the total minted.
+    pub fn mint_batch(e: Env, admin: Address, mints: Vec<(Address, i128)>) -> i128 {
+        crate::batch::mint_batch(&e, &admin, mints)
+    }
+
+    /// Admin-gated batch clawback across multiple targets.
+    pub fn clawback_batch(e: Env, admin: Address, targets: Vec<(Address, i128)>) {
+        crate::batch::clawback_batch(&e, &admin, targets);
+    }
+
+    /// Admin-gated airdrop distributed evenly across current holders.
+    pub fn airdrop(e: Env, admin: Address, token: Address, total_amount: i128) {
+        crate::airdrop::airdrop(&e, &admin, &token, total_amount);
+    }
+
+    /// Distributes dividends pro rata to snapshot balances.
+    pub fn distribute_dividend(
+        e: Env,
+        admin: Address,
+        snapshot_id: u32,
+        total: i128,
+        holders: Vec<Address>,
+    ) {
+        crate::dividend::distribute_dividend(&e, &admin, snapshot_id, total, holders);
+    }
 }
 
 #[cfg(test)]
