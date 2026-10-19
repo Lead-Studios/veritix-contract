@@ -8,10 +8,8 @@
 use crate::escrow::pay;
 use crate::events::{MultiEscrowCreated, MultiEscrowRefunded, MultiEscrowReleased};
 use crate::storage_types::{DataKey, MultiEscrowRecord, MultiEscrowStatus};
-use soroban_sdk::{Address, Env, Vec};
-
-/// Maximum number of beneficiaries allowed in a multi-beneficiary escrow.
-pub const MAX_MULTI_ESCROW_BENEFICIARIES: u32 = 100;
+use crate::validation::require_positive_amount;
+use soroban_sdk::{token, Address, Env, Vec};
 
 /// Number of multi-escrows created so far, which is also the next id.
 pub fn count(e: &Env) -> u64 {
@@ -43,6 +41,11 @@ pub fn is_settled(e: &Env, id: u64) -> bool {
         record(e, id).status,
         MultiEscrowStatus::Released | MultiEscrowStatus::Refunded
     )
+}
+
+/// Sends `amount` of `token` out of the contract to `to`.
+fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
+    token::TokenClient::new(e, token_address).transfer(&e.current_contract_address(), to, &amount);
 }
 
 /// Holds `total` of `token` split across `beneficiaries` and returns the new
@@ -87,8 +90,10 @@ pub fn create(
         );
     }
 
+    require_positive_amount(total);
     let mut sum: i128 = 0;
     for amount in amounts.iter() {
+        require_positive_amount(amount);
         sum = sum
             .checked_add(amount)
             .unwrap_or_else(|| panic!("MultiEscrowOverflow: amounts overflow i128"));

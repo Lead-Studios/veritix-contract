@@ -13,7 +13,10 @@ pub fn total_supply(e: &Env) -> i128 {
 
 /// The configured hard cap, or 0 when supply is uncapped.
 pub fn max_supply(e: &Env) -> i128 {
-    e.storage().persistent().get(&DataKey::MaxSupply).unwrap_or(0)
+    e.storage()
+        .persistent()
+        .get(&DataKey::MaxSupply)
+        .unwrap_or(0)
 }
 
 /// Tokens held by `account`. An absent key means a zero balance.
@@ -45,7 +48,10 @@ pub fn credit(e: &Env, account: &Address, amount: i128) {
 pub fn debit(e: &Env, account: &Address, amount: i128) {
     let balance = balance_of(e, account);
     if balance < amount {
-        panic!("InsufficientBalance: {} available, {} required", balance, amount);
+        panic!(
+            "InsufficientBalance: {} available, {} required",
+            balance, amount
+        );
     }
     let new_balance = balance - amount;
     if new_balance == 0 {
@@ -74,7 +80,10 @@ pub fn increase_supply(e: &Env, amount: i128) {
         .unwrap_or_else(|| panic!("SupplyOverflow: minting {} would overflow i128", amount));
     let cap = max_supply(e);
     if cap > 0 && new_supply > cap {
-        panic!("SupplyCapExceeded: {} would exceed the cap of {}", new_supply, cap);
+        panic!(
+            "SupplyCapExceeded: {} would exceed the cap of {}",
+            new_supply, cap
+        );
     }
     e.storage()
         .persistent()
