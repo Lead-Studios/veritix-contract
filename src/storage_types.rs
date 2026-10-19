@@ -55,6 +55,8 @@ pub enum DataKey {
     // --- Escrows and disputes ------------------------------------------------
     /// An escrow held under its id, for lifecycle and settlement tracking.
     Escrow(u64),
+    /// Escrow record keyed by its id.
+    EscrowRecord(u32),
     /// Number of escrows created so far (also the next escrow id).
     EscrowCount,
     /// Total token amount still held across all active escrows.
@@ -72,7 +74,7 @@ pub enum DataKey {
     /// Recurring schedule ids indexed by payee.
     PayeeRecurrings(Address),
     /// The dispute record open over an escrow, keyed by escrow id.
-    Dispute(u64),
+    Dispute(u32),
 /// An authorised recurring payment, keyed by recurring payment id.
     Recurring(u64),
     /// Number of recurring schedules created so far (also the next id).
@@ -210,7 +212,7 @@ pub struct DisputeRecord {
     /// Who raised the dispute.
     pub claimant: Address,
     /// The escrow this dispute is over.
-    pub escrow_id: u64,
+    pub escrow_id: u32,
     /// Current lifecycle state.
     pub status: DisputeStatus,
     /// Ledger at which the dispute was raised, for expiry and age checks.
