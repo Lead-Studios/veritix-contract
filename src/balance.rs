@@ -14,7 +14,10 @@ pub fn total_supply(e: &Env) -> i128 {
 
 /// The configured hard cap, or 0 when supply is uncapped.
 pub fn max_supply(e: &Env) -> i128 {
-    e.storage().persistent().get(&DataKey::MaxSupply).unwrap_or(0)
+    e.storage()
+        .persistent()
+        .get(&DataKey::MaxSupply)
+        .unwrap_or(0)
 }
 
 /// Tokens held by `account`. An absent key means a zero balance.
@@ -123,6 +126,31 @@ pub fn holders_page(e: &Env, offset: u32, limit: u32) -> Vec<Address> {
 
 /// Credits `amount` to `account` without touching total supply.
 ///
+pub fn holders(e: &Env) -> soroban_sdk::Vec<Address> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::HolderSet)
+        .unwrap_or_else(|| soroban_sdk::Vec::new(e))
+}
+
+fn add_holder(e: &Env, account: &Address) {
+    let mut set = holders(e);
+    if !set.contains(account.clone()) {
+        set.push_back(account.clone());
+        e.storage().persistent().set(&DataKey::HolderSet, &set);
+    }
+}
+
+fn remove_holder(e: &Env, account: &Address) {
+    let mut set = holders(e);
+    if let Some(index) = set.first_index_of(account.clone()) {
+        set.remove(index);
+        e.storage().persistent().set(&DataKey::HolderSet, &set);
+    }
+}
+
+/// Credits `amount` to `account` without touching total supply.
+///
 /// Callers that bring new tokens into circulation must also call
 /// [`increase_supply`] so the two ledgers cannot drift apart.
 ///
@@ -153,7 +181,10 @@ pub fn credit(e: &Env, account: &Address, amount: i128) {
 pub fn debit(e: &Env, account: &Address, amount: i128) {
     let balance = balance_of(e, account);
     if balance < amount {
-        panic!("InsufficientBalance: {} available, {} required", balance, amount);
+        panic!(
+            "InsufficientBalance: {} available, {} required",
+            balance, amount
+        );
     }
     let new_balance = balance - amount;
     if new_balance == 0 {
@@ -183,8 +214,30 @@ pub fn increase_supply(e: &Env, amount: i128) {
         .unwrap_or_else(|| panic!("SupplyOverflow: minting {} would overflow i128", amount));
     let cap = max_supply(e);
     if cap > 0 && new_supply > cap {
-        panic!("SupplyCapExceeded: {} would exceed the cap of {}", new_supply, cap);
+        panic!(
+            "SupplyCapExceeded: {} would exceed the cap of {}",
+            new_supply, cap
+        );
     }
+    e.storage()
+        .persistent()
+        .set(&DataKey::TotalSupply, &new_supply);
+}
+
+/// Removes `amount` from total supply.
+///
+/// The mirror of [`increase_supply`]: supply only ever shrinks through burns
+/// and clawbacks, so the counter and the sum of balances cannot drift apart.
+/// The cap is not re-checked — shrinking supply can never violate it.
+///
+/// # Panics
+///
+/// Panics with `SupplyUnderflow` when `amount` exceeds the current supply,
+/// which would mean burning tokens that were never minted.
+pub fn decrease_supply(e: &Env, amount: i128) {
+    let new_supply = total_supply(e)
+        .checked_sub(amount)
+        .unwrap_or_else(|| panic!("SupplyUnderflow: burning {} would drive supply below zero", amount));
     e.storage()
         .persistent()
         .set(&DataKey::TotalSupply, &new_supply);
@@ -264,6 +317,13 @@ pub fn clawback(e: &Env, admin: &Address, from: &Address, amount: i128) {
 /// Panics on a non-positive `amount` or when `from` holds less than `amount`.
 pub fn transfer(e: &Env, from: &Address, to: &Address, amount: i128) {
     require_positive_amount(amount);
+    crate::control::require_not_paused(e);
+    crate::control::require_not_frozen(e, from);
+    crate::control::require_not_frozen(e, to);
+    crate::authorization::require_authorized(e, from);
+    crate::authorization::require_authorized(e, to);
+    crate::whitelist::require_whitelisted(e, from);
+    crate::whitelist::require_whitelisted(e, to);
     debit(e, from, amount);
     credit(e, to, amount);
     Transfer {
