@@ -373,6 +373,53 @@ impl VeriTixPay {
     pub fn refund_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
         crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
     }
+
+    /// Adds a batch of accounts to the whitelist. Admin-only.
+    pub fn add_to_whitelist_batch(e: Env, admin: Address, accounts: Vec<Address>) {
+        crate::whitelist_batch::add_to_whitelist_batch(&e, &admin, accounts);
+    }
+
+    /// Adds accounts to the whitelist with a sequence nonce. Admin-only. Reused nonce panics.
+    pub fn add_to_whitelist_signed(e: Env, admin: Address, accounts: Vec<Address>, nonce: u64) {
+        crate::whitelist_signed::add_to_whitelist_signed(&e, &admin, accounts, nonce);
+    }
+
+    /// Returns whether `account` is on the whitelist.
+    pub fn is_whitelisted(e: Env, account: Address) -> bool {
+        e.storage()
+            .persistent()
+            .get(&DataKey::Whitelisted(account))
+            .unwrap_or(false)
+    }
+
+    /// Returns the current whitelist nonce for `admin`.
+    pub fn get_whitelist_nonce(e: Env, admin: Address) -> u64 {
+        crate::whitelist_signed::get_nonce(&e, &admin)
+    }
+
+    /// Returns `(open_count, resolved_count, expired_count)` across all disputes.
+    pub fn dispute_stats(e: Env) -> (u32, u32, u32) {
+        crate::dispute_stats::dispute_stats(&e)
+    }
+
+    /// Returns all disputes raised by `claimant`.
+    pub fn get_disputes_by_claimant(
+        e: Env,
+        claimant: Address,
+    ) -> Vec<crate::storage_types::DisputeRecord> {
+        crate::dispute_stats::get_disputes_by_claimant(&e, &claimant)
+    }
+
+    /// Emergency withdrawal of stranded tokens. Admin-only. Refuses to touch escrowed funds.
+    pub fn emergency_withdraw(
+        e: Env,
+        admin: Address,
+        recipient: Address,
+        token: Address,
+        amount: i128,
+    ) {
+        crate::emergency::emergency_withdraw(&e, &admin, &recipient, &token, amount);
+    }
 }
 
 #[cfg(test)]
@@ -958,6 +1005,73 @@ mod tests {
 
         assert_eq!(f.client.get_escrow(&id).amount, 600);
         assert!(!f.client.is_escrow_settled(&id));
+    }
+
+    #[test]
+    fn whitelist_batch_and_signed() {
+        let f = Fixture::new();
+        let u1 = Address::generate(&f.e);
+        let u2 = Address::generate(&f.e);
+        let u3 = Address::generate(&f.e);
+
+        assert!(!f.client.is_whitelisted(&u1));
+        assert!(!f.client.is_whitelisted(&u2));
+
+        f.client.add_to_whitelist_batch(&f.admin, &vec![&f.e, u1.clone(), u2.clone()]);
+        assert!(f.client.is_whitelisted(&u1));
+        assert!(f.client.is_whitelisted(&u2));
+
+        let nonce = f.client.get_whitelist_nonce(&f.admin);
+        assert_eq!(nonce, 0);
+
+        f.client.add_to_whitelist_signed(&f.admin, &vec![&f.e, u3.clone()], &0);
+        assert!(f.client.is_whitelisted(&u3));
+        assert_eq!(f.client.get_whitelist_nonce(&f.admin), 1);
+
+        // Reusing nonce 0 panics
+        assert!(panics(|| {
+            f.client.add_to_whitelist_signed(&f.admin, &vec![&f.e, u3.clone()], &0);
+        }));
+    }
+
+    #[test]
+    fn dispute_stats_and_claimant_tracking() {
+        let f = Fixture::new();
+        let (d, _b, _t, _tok, id) = f.escrow(1_000);
+        let stats_before = f.client.dispute_stats();
+        assert_eq!(stats_before, (0, 0, 0));
+
+        f.client.raise_dispute(&d, &(id as u64), &None);
+        let stats_after = f.client.dispute_stats();
+        assert_eq!(stats_after, (1, 0, 0));
+
+        let claimant_disputes = f.client.get_disputes_by_claimant(&d);
+        assert_eq!(claimant_disputes.len(), 1);
+        assert_eq!(claimant_disputes.get(0).unwrap().escrow_id, id as u64);
+    }
+
+    #[test]
+    fn emergency_withdraw_leaves_escrowed_funds() {
+        let f = Fixture::new();
+        let depositor = Address::generate(&f.e);
+        let recipient = Address::generate(&f.e);
+        let (token_address, token) = f.asset(&depositor, 1_000);
+
+        // Lock 600 in escrow
+        let b = Address::generate(&f.e);
+        f.client.create_escrow(&depositor, &b, &token_address, &600, &2_000);
+
+        // Stranded funds: mint 400 extra directly to contract
+        token.mint(&f.contract, &400);
+
+        // Trying to withdraw more than unescrowed (400) panics
+        assert!(panics(|| {
+            f.client.emergency_withdraw(&f.admin, &recipient, &token_address, &500);
+        }));
+
+        // Withdrawing unescrowed 400 succeeds
+        f.client.emergency_withdraw(&f.admin, &recipient, &token_address, &400);
+        assert_eq!(token.balance(&recipient), 400);
     }
 }
 

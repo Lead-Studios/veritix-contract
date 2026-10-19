@@ -164,6 +164,7 @@ pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u64, resolver: Opti
         is_final: false,
     };
     write_dispute(e, escrow_id, &record);
+    crate::dispute_stats::index_dispute(e, claimant, escrow_id);
     escrow.status = EscrowStatus::Disputed;
     write_escrow(e, escrow_id, &escrow);
     crate::events::DisputeRaised {

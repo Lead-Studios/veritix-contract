@@ -38,9 +38,12 @@ use soroban_sdk as _;
 pub mod admin;
 pub mod allowance;
 pub mod authorization;
+pub mod balance;
 pub mod contract;
 pub mod control;
 pub mod dispute;
+pub mod dispute_stats;
+pub mod emergency;
 pub mod escrow;
 pub mod events;
 pub mod metadata;
@@ -50,6 +53,8 @@ pub mod splitter;
 pub mod storage_types;
 pub mod validation;
 pub mod whitelist;
+pub mod whitelist_batch;
+pub mod whitelist_signed;
 
 #[cfg(test)]
 mod admin_test;
