@@ -19,28 +19,32 @@ pub struct DisputeHarness;
 
 #[contractimpl]
 impl DisputeHarness {
-    pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u64, resolver: Option<Address>) {
+    pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u32, resolver: Option<Address>) {
         crate::dispute::raise_dispute(&e, &claimant, escrow_id, resolver);
     }
 
-    pub fn is_dispute_open(e: Env, escrow_id: u64) -> bool {
+    pub fn is_dispute_open(e: Env, escrow_id: u32) -> bool {
         crate::dispute::is_dispute_open(&e, escrow_id)
     }
 
-    pub fn get_dispute(e: Env, escrow_id: u64) -> DisputeRecord {
+    pub fn get_dispute(e: Env, escrow_id: u32) -> DisputeRecord {
         crate::dispute::get_dispute(&e, escrow_id)
     }
 
-    pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+    pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u32, winner: Address) {
         crate::dispute::resolve_dispute(&e, resolver, escrow_id, winner);
     }
 
-    pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u64) {
+    pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u32) {
         crate::dispute::appeal_dispute(&e, &caller, escrow_id);
     }
 
-    pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+    pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u32, winner: Address) {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
+    }
+
+    pub fn expire_dispute(e: Env, caller: Address, escrow_id: u32) {
+        crate::dispute::expire_dispute(&e, &caller, escrow_id);
     }
 }
 
@@ -58,9 +62,9 @@ fn escrow(e: &Env, depositor: &Address, beneficiary: &Address, amount: i128) -> 
 
 /// Stores an escrow and its depositor's balance lock directly, mirroring how
 /// a raised escrow records both before a dispute can reference it.
-fn seed_escrow(e: &Env, cid: &Address, id: u64, record: &EscrowRecord, locked: i128) {
+fn seed_escrow(e: &Env, cid: &Address, id: u32, record: &EscrowRecord, locked: i128) {
     e.as_contract(cid, || {
-        e.storage().persistent().set(&DataKey::Escrow(id), record);
+        e.storage().persistent().set(&DataKey::EscrowRecord(id), record);
         e.storage()
             .persistent()
             .set(&DataKey::EscrowLocked(record.depositor.clone()), &locked);
@@ -86,17 +90,17 @@ fn escrow_locked(e: &Env, cid: &Address, account: &Address) -> i128 {
     })
 }
 
-fn escrow_status(e: &Env, cid: &Address, id: u64) -> EscrowStatus {
+fn escrow_status(e: &Env, cid: &Address, id: u32) -> EscrowStatus {
     e.as_contract(cid, || {
         e.storage()
             .persistent()
-            .get::<_, EscrowRecord>(&DataKey::Escrow(id))
+            .get::<_, EscrowRecord>(&DataKey::EscrowRecord(id))
             .unwrap()
             .status
     })
 }
 
-fn setup() -> (Env, Address, Address, Address, Address, u64) {
+fn setup() -> (Env, Address, Address, Address, Address, u32) {
     let e = Env::default();
     e.mock_all_auths();
     let cid = e.register_contract(None, DisputeHarness);
@@ -126,7 +130,7 @@ fn seed_full(
     resolver: &Address,
     depositor: &Address,
     beneficiary: &Address,
-    id: u64,
+    id: u32,
 ) {
     seed_escrow(e, cid, id, &escrow(e, depositor, beneficiary, 100), 100);
     credit(e, cid, depositor, 100);
@@ -375,4 +379,27 @@ fn resolve_appeal_requires_an_appeal() {
     client.resolve_dispute(&resolver, &id, &beneficiary);
 
     client.resolve_appeal(&resolver, &id, &beneficiary);
+}
+
+#[test]
+#[should_panic(expected = "DisputeSelfArbitration")]
+fn party_cannot_arbitrate_own_dispute() {
+    let (e, cid, _resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_escrow(&e, &cid, id, &escrow(&e, &depositor, &beneficiary, 100), 100);
+    client.raise_dispute(&depositor, &id, &Some(depositor.clone()));
+}
+
+#[test]
+#[should_panic(expected = "WinnerMismatch")]
+fn winner_cannot_be_changed_at_finalisation() {
+    let (e, cid, resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_full(&e, &cid, &client, &resolver, &depositor, &beneficiary, id);
+
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+    let ruling = e.ledger().sequence();
+    jump(&e, ruling + APPEAL_WINDOW_LEDGERS + 1);
+
+    client.resolve_dispute(&resolver, &id, &depositor);
 }

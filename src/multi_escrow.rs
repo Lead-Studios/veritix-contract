@@ -5,7 +5,8 @@
 //! atomic — either every leg is paid or the whole call reverts — so a
 //! beneficiary can never be skipped because a later leg failed.
 
-use crate::events::{MultiEscrowCreated, MultiEscrowReleased};
+use crate::escrow::pay;
+use crate::events::{MultiEscrowCreated, MultiEscrowRefunded, MultiEscrowReleased};
 use crate::storage_types::{DataKey, MultiEscrowRecord, MultiEscrowStatus};
 use crate::validation::require_positive_amount;
 use soroban_sdk::{token, Address, Env, Vec};
@@ -80,6 +81,13 @@ pub fn create(
     }
     if beneficiaries.is_empty() {
         panic!("MultiEscrowEmpty: at least one beneficiary is required");
+    }
+    if beneficiaries.len() > MAX_MULTI_ESCROW_BENEFICIARIES {
+        panic!(
+            "MultiEscrowTooManyBeneficiaries: {} exceeds maximum allowed {}",
+            beneficiaries.len(),
+            MAX_MULTI_ESCROW_BENEFICIARIES
+        );
     }
 
     require_positive_amount(total);
@@ -161,9 +169,6 @@ pub fn release(e: &Env, caller: &Address, id: u64) {
         pay(e, &record.token, &beneficiary, amount);
     }
 
-    // Drain the record to zero: every leg was paid, so nothing is still owed.
-    let drained = Vec::new(e);
-    record.amounts = drained;
     record.status = MultiEscrowStatus::Released;
     e.storage()
         .persistent()
@@ -206,4 +211,11 @@ pub fn refund(e: &Env, caller: &Address, id: u64) {
     e.storage()
         .persistent()
         .set(&DataKey::MultiEscrow(id), &record);
+
+    MultiEscrowRefunded {
+        depositor: record.depositor.clone(),
+        id,
+        total: record.total,
+    }
+    .publish(e);
 }

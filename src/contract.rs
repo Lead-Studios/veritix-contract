@@ -21,6 +21,11 @@ fn initialize_state(e: &Env, admin_addr: &Address, meta: &TokenMetadata) {
 
 #[contractimpl]
 impl VeriTixPay {
+    /// Atomic constructor running at deploy time.
+    pub fn __constructor(e: Env, admin_addr: Address) {
+        initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+    }
+
     /// Sets the admin and the default token metadata.
     ///
     /// One-shot: a second call is rejected rather than silently replacing the
@@ -28,6 +33,12 @@ impl VeriTixPay {
     /// point below.
     pub fn initialize(e: Env, admin_addr: Address) {
         initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+    }
+
+    /// Sets the admin, default metadata, and a hard supply cap.
+    pub fn initialize_with_max_supply(e: Env, admin_addr: Address, max_supply: i128) {
+        initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+        admin::set_max_supply(&e, max_supply);
     }
 
     /// Sets the admin and caller-supplied token metadata.
@@ -47,6 +58,17 @@ impl VeriTixPay {
                 decimals,
             },
         );
+    }
+
+    /// Sets whether `account` is authorized to move tokens. Admin-only.
+    pub fn set_authorized(e: Env, admin_addr: Address, account: Address, authorized: bool) {
+        admin::check_admin(&e, &admin_addr);
+        crate::authorization::set_authorized(&e, &account, authorized);
+    }
+
+    /// Whether `account` is authorized to move tokens.
+    pub fn is_authorized(e: Env, account: Address) -> bool {
+        crate::authorization::is_authorized(&e, &account)
     }
 
     /// True once an admin has been stored.
@@ -77,6 +99,21 @@ impl VeriTixPay {
     /// Whether whitelist enforcement is enabled.
     pub fn is_whitelist_enabled(e: Env) -> bool {
         whitelist::is_whitelist_enabled(&e)
+    }
+
+    /// Adds `account` to the whitelist. Admin-only.
+    pub fn add_to_whitelist(e: Env, admin_addr: Address, account: Address) {
+        whitelist::add_to_whitelist(&e, &admin_addr, &account);
+    }
+
+    /// Removes `account` from the whitelist. Admin-only.
+    pub fn remove_from_whitelist(e: Env, admin_addr: Address, account: Address) {
+        whitelist::remove_from_whitelist(&e, &admin_addr, &account);
+    }
+
+    /// Whether `account` is whitelisted.
+    pub fn is_whitelisted(e: Env, account: Address) -> bool {
+        whitelist::is_whitelisted(&e, &account)
     }
 
     /// The token name.
@@ -118,6 +155,7 @@ impl VeriTixPay {
     /// Moves `amount` of tokens from `from` to `to`.
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
+        crate::authorization::require_authorized(&e, &from);
         balance::transfer(&e, &from, &to, amount);
     }
 
@@ -262,23 +300,33 @@ impl VeriTixPay {
     }
 
     /// Raises a dispute over `escrow_id`, freezing it until a ruling is final.
-    pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u64, resolver: Option<Address>) {
+    pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u32, resolver: Option<Address>) {
         crate::dispute::raise_dispute(&e, &claimant, escrow_id, resolver);
     }
 
     /// Whether a dispute on `escrow_id` is still live and blocking settlement.
-    pub fn is_dispute_open(e: Env, escrow_id: u64) -> bool {
+    pub fn is_dispute_open(e: Env, escrow_id: u32) -> bool {
         crate::dispute::is_dispute_open(&e, escrow_id)
     }
 
     /// The dispute record for `escrow_id`.
-    pub fn get_dispute(e: Env, escrow_id: u64) -> crate::storage_types::DisputeRecord {
+    pub fn get_dispute(e: Env, escrow_id: u32) -> crate::storage_types::DisputeRecord {
         crate::dispute::get_dispute(&e, escrow_id)
     }
 
     /// The retained successful charge history for a recurring schedule.
     pub fn get_recurring_history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
         recurring::get_recurring_history(&e, recurring_id)
+    }
+
+    /// Reads a recurring schedule by id.
+    pub fn get_recurring(e: Env, recurring_id: u64) -> RecurringPayment {
+        recurring::get_recurring(&e, recurring_id)
+    }
+
+    /// Whether the recurring schedule at `recurring_id` is active and not paused.
+    pub fn is_recurring_active(e: Env, recurring_id: u64) -> bool {
+        recurring::is_recurring_active(&e, recurring_id)
     }
 
     /// Creates a recurring schedule, authorising future charges from `payer`.
@@ -310,23 +358,28 @@ impl VeriTixPay {
 
     /// The arbiter picks a winner: records the ruling and opens the appeal
     /// window; a second call after the window lapses settles and pays.
-    pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+    pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u32, winner: Address) {
         crate::dispute::resolve_dispute(&e, resolver, escrow_id, winner);
     }
 
     /// The losing party escalates a ruling within the appeal window.
-    pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u64) {
+    pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u32) {
         crate::dispute::appeal_dispute(&e, &caller, escrow_id);
     }
 
     /// The final, unappealable ruling: settles the escrow and pays the winner.
-    pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+    pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u32, winner: Address) {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
     /// Executes one due charge from an authorised recurring payment.
     pub fn execute_recurring(e: Env, recurring_id: u64) {
         recurring::execute_recurring(&e, recurring_id);
+    }
+
+    /// Cancels a recurring payment schedule.
+    pub fn cancel_recurring(e: Env, caller: Address, recurring_id: u64) {
+        recurring::cancel_recurring(&e, &caller, recurring_id);
     }
 
     /// Sets the global dispute arbiter (resolver) used to settle disputes.

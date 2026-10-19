@@ -35,6 +35,8 @@ pub enum DataKey {
     WhitelistEnabled,
     /// Whether an account is frozen and cannot move tokens.
     Frozen(Address),
+    /// Whether an account is whitelisted.
+    Whitelisted(Address),
     /// Whether an account is authorized to move tokens. Absent means authorized.
     Authorized(Address),
 
@@ -212,7 +214,7 @@ pub struct DisputeRecord {
     /// Who raised the dispute.
     pub claimant: Address,
     /// The escrow this dispute is over.
-    pub escrow_id: u64,
+    pub escrow_id: u32,
     /// Current lifecycle state.
     pub status: DisputeStatus,
     /// Ledger at which the dispute was raised, for expiry and age checks.
