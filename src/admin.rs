@@ -48,3 +48,12 @@ pub fn initialized_at_ledger(e: &Env) -> u32 {
         .get(&DataKey::InitializedAtLedger)
         .unwrap_or(0)
 }
+
+/// Sets the hard supply cap. non-positive values are rejected.
+pub fn set_max_supply(e: &Env, max_supply: i128) {
+    if max_supply <= 0 {
+        panic!("InvalidAmount: max_supply must be positive");
+    }
+    e.storage().persistent().set(&DataKey::MaxSupply, &max_supply);
+}
+

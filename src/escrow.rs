@@ -16,11 +16,11 @@ pub fn count(e: &Env) -> u32 {
         .unwrap_or(0)
 }
 
-/// Total token amount still held across all active escrows.
-pub fn value_locked(e: &Env) -> i128 {
+/// Total token amount still held across all active escrows for a given token.
+pub fn value_locked(e: &Env, token: &Address) -> i128 {
     e.storage()
         .persistent()
-        .get(&DataKey::EscrowValueLocked)
+        .get(&DataKey::EscrowValueLocked(token.clone()))
         .unwrap_or(0)
 }
 
@@ -86,28 +86,31 @@ pub fn ids_page(e: &Env, key: &DataKey, start: u32, limit: u32) -> soroban_sdk::
     out
 }
 
-/// Total token amount still held across all active escrows.
-pub fn escrowed_total(e: &Env) -> i128 {
-    value_locked(e)
+/// Total token amount still held across all active escrows for a given token.
+pub fn escrowed_total(e: &Env, token: &Address) -> i128 {
+    value_locked(e, token)
 }
 
-/// `(total locked, active count, settled count)` over every escrow created.
+/// `(total locked for token, active count, settled count)` over every escrow created for `token`.
 ///
 /// Walks every escrow, so its cost grows with the number of escrows.
-pub fn stats(e: &Env) -> (i128, u32, u32) {
+pub fn stats(e: &Env, token: &Address) -> (i128, u32, u32) {
     let mut active = 0u32;
     let mut settled = 0u32;
     let mut id = 0u32;
     let n = count(e);
     while id < n {
-        if is_settled_status(&record(e, id).status) {
-            settled += 1;
-        } else {
-            active += 1;
+        let rec = record(e, id);
+        if &rec.token == token {
+            if is_settled_status(&rec.status) {
+                settled += 1;
+            } else {
+                active += 1;
+            }
         }
         id += 1;
     }
-    (value_locked(e), active, settled)
+    (value_locked(e, token), active, settled)
 }
 
 /// Overwrites the record stored at `id`.
@@ -117,17 +120,17 @@ fn store_record(e: &Env, id: u32, record: &EscrowRecord) {
         .set(&DataKey::EscrowRecord(id), record);
 }
 
-/// Adds `amount` to the total held in active escrows.
-fn increase_value_locked(e: &Env, amount: i128) {
-    let new_total = value_locked(e)
+/// Adds `amount` to the total held in active escrows for `token`.
+fn increase_value_locked(e: &Env, token: &Address, amount: i128) {
+    let new_total = value_locked(e, token)
         .checked_add(amount)
         .unwrap_or_else(|| panic!("EscrowOverflow: locked value would overflow i128"));
     e.storage()
         .persistent()
-        .set(&DataKey::EscrowValueLocked, &new_total);
+        .set(&DataKey::EscrowValueLocked(token.clone()), &new_total);
 }
 
-/// Takes `amount` out of the total held in active escrows, refusing to go
+/// Takes `amount` out of the total held in active escrows for `token`, refusing to go
 /// negative.
 ///
 /// A settlement that could drive the total below zero would mean the contract
@@ -135,8 +138,8 @@ fn increase_value_locked(e: &Env, amount: i128) {
 /// one a user has already trusted with the escrow. The subtraction is checked
 /// rather than saturating so a bug surfaces here instead of as a silently wrong
 /// total.
-fn decrease_value_locked(e: &Env, amount: i128) {
-    let current = value_locked(e);
+fn decrease_value_locked(e: &Env, token: &Address, amount: i128) {
+    let current = value_locked(e, token);
     let new_total = current.checked_sub(amount).unwrap_or_else(|| {
         panic!(
             "EscrowUnderflow: paying out {} would exceed the {} still held",
@@ -145,7 +148,7 @@ fn decrease_value_locked(e: &Env, amount: i128) {
     });
     e.storage()
         .persistent()
-        .set(&DataKey::EscrowValueLocked, &new_total);
+        .set(&DataKey::EscrowValueLocked(token.clone()), &new_total);
 }
 
 /// Reads an escrow record.
@@ -256,6 +259,33 @@ fn require_settlement_authority(e: &Env, caller: &Address, record: &EscrowRecord
     caller.require_auth();
 }
 
+/// Requires that `caller` is authorized to refund `record`.
+///
+/// The admin or beneficiary may refund at any time; the depositor may only
+/// refund after the deadline ledger has passed.
+fn require_refund_authority(e: &Env, caller: &Address, record: &EscrowRecord) {
+    let is_admin = crate::admin::is_admin(e, caller);
+    let is_beneficiary = &record.beneficiary == caller;
+    let is_depositor = &record.depositor == caller;
+
+    if !is_admin && !is_beneficiary && !is_depositor {
+        panic!("Unauthorized: only the admin, beneficiary, or depositor may refund escrow");
+    }
+
+    if is_depositor
+        && !is_admin
+        && !is_beneficiary
+        && e.ledger().sequence() <= record.deadline_ledger
+    {
+        panic!(
+            "EscrowDeadlineNotPassed: depositor may only refund after deadline ledger {}",
+            record.deadline_ledger
+        );
+    }
+
+    caller.require_auth();
+}
+
 /// Sends `amount` of `token` out of the contract to `to`.
 fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
     token::TokenClient::new(e, token_address).transfer(&e.current_contract_address(), to, &amount);
@@ -273,7 +303,8 @@ fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
 ///
 /// # Panics
 ///
-/// Panics through [`require_positive_amount`] on a non-positive `amount`, and
+/// Panics through [`require_positive_amount`] on a non-positive `amount`, with
+/// `InvalidDeadline` when `deadline_ledger <= e.ledger().sequence()`, and
 /// propagates whatever the token contract raises when the depositor's balance
 /// or the token's own authorization rules are not satisfied.
 pub fn create(
@@ -285,6 +316,13 @@ pub fn create(
     deadline_ledger: u32,
 ) -> u32 {
     require_positive_amount(amount);
+    if deadline_ledger <= e.ledger().sequence() {
+        panic!(
+            "InvalidDeadline: deadline ledger {} must be strictly greater than current ledger {}",
+            deadline_ledger,
+            e.ledger().sequence()
+        );
+    }
     if depositor == beneficiary {
         panic!("EscrowSameParty: depositor and beneficiary must be different addresses");
     }
@@ -307,7 +345,7 @@ pub fn create(
             created_ledger: e.ledger().sequence(),
         },
     );
-    increase_value_locked(e, amount);
+    increase_value_locked(e, token_address, amount);
 
     EscrowCreated {
         depositor: depositor.clone(),
@@ -365,11 +403,11 @@ pub fn refund(e: &Env, caller: &Address, id: u32) {
     require_no_open_dispute(e, id);
     let mut record = record(e, id);
     require_active(id, &record);
-    require_settlement_authority(e, caller, &record);
+    require_refund_authority(e, caller, &record);
 
     let amount = record.amount;
     pay(e, &record.token, &record.depositor, amount);
-    decrease_value_locked(e, amount);
+    decrease_value_locked(e, &record.token, amount);
     record.status = EscrowStatus::Refunded;
     record.amount = 0;
     store_record(e, id, &record);
@@ -415,7 +453,7 @@ pub fn auto_release(e: &Env, id: u32) {
 
     let amount = record.amount;
     pay(e, &record.token, &record.beneficiary, amount);
-    decrease_value_locked(e, amount);
+    decrease_value_locked(e, &record.token, amount);
     record.status = EscrowStatus::Released;
     record.amount = 0;
     store_record(e, id, &record);
@@ -452,7 +490,7 @@ pub fn admin_settle(e: &Env, admin: &Address, id: u32, winner: &Address) {
 
     let amount = record.amount;
     pay(e, &record.token, winner, amount);
-    decrease_value_locked(e, amount);
+    decrease_value_locked(e, &record.token, amount);
     record.status = if winner == &record.beneficiary {
         EscrowStatus::Released
     } else {
@@ -498,7 +536,7 @@ pub fn release_partial(e: &Env, caller: &Address, id: u32, amount: i128) {
     }
 
     pay(e, &record.token, &record.beneficiary, amount);
-    decrease_value_locked(e, amount);
+    decrease_value_locked(e, &record.token, amount);
     let remaining = record.amount - amount;
     record.amount = remaining;
     if remaining == 0 {

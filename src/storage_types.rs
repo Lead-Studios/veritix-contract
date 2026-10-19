@@ -35,6 +35,8 @@ pub enum DataKey {
     WhitelistEnabled,
     /// Whether an account is frozen and cannot move tokens.
     Frozen(Address),
+    /// Whether an account is whitelisted.
+    Whitelisted(Address),
     /// Whether an account is authorized to move tokens. Absent means authorized.
     Authorized(Address),
 
@@ -59,8 +61,8 @@ pub enum DataKey {
     EscrowRecord(u32),
     /// Number of escrows created so far (also the next escrow id).
     EscrowCount,
-    /// Total token amount still held across all active escrows.
-    EscrowValueLocked,
+    /// Total token amount still held across all active escrows for a given token.
+    EscrowValueLocked(Address),
     /// Escrow ids created by a depositor, in creation order.
     DepositorEscrows(Address),
     /// Escrow ids owed to a beneficiary, in creation order.
@@ -216,7 +218,7 @@ pub struct DisputeRecord {
     /// Who raised the dispute.
     pub claimant: Address,
     /// The escrow this dispute is over.
-    pub escrow_id: u64,
+    pub escrow_id: u32,
     /// Current lifecycle state.
     pub status: DisputeStatus,
     /// Ledger at which the dispute was raised, for expiry and age checks.
