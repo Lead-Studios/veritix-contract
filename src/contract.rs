@@ -1,6 +1,6 @@
 use crate::metadata::{self, TokenMetadata};
 use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution, RecurringPayment};
-use crate::{admin, balance, escrow, recurring, whitelist};
+use crate::{admin, allowance, balance, escrow, recurring, whitelist};
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
@@ -119,6 +119,58 @@ impl VeriTixPay {
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         balance::transfer(&e, &from, &to, amount);
+    }
+
+    // ---- Allowance -----------------------------------------------------
+
+    /// Authorizes `spender` to move up to `amount` of `owner`'s tokens.
+    ///
+    /// Overwrites rather than accumulating; use [`Self::increase_allowance`] to
+    /// top up an existing grant.
+    pub fn approve(
+        e: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
+        allowance::approve(&e, &owner, &spender, amount, expiration_ledger);
+    }
+
+    /// The amount `spender` may still move on `owner`'s behalf.
+    ///
+    /// An expired allowance reads as `0` rather than as an error.
+    pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
+        allowance::allowance(&e, &from, &spender)
+    }
+
+    /// The ledger on which the `owner`/`spender` allowance lapses.
+    pub fn allowance_expiration(e: Env, from: Address, spender: Address) -> u32 {
+        allowance::allowance_expiration(&e, &from, &spender)
+    }
+
+    /// Moves `amount` of `owner`'s tokens to `to`, spending the allowance.
+    ///
+    /// The caller is the spender, so the spender's own authorisation is what
+    /// authorises the call and the owner's allowance is what caps it.
+    pub fn transfer_from(e: Env, from: Address, to: Address, spender: Address, amount: i128) {
+        allowance::transfer_from(&e, &from, &to, &spender, amount);
+    }
+
+    /// Raises an allowance by `amount`, preserving the grant's expiry.
+    pub fn increase_allowance(
+        e: Env,
+        owner: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
+        allowance::increase_allowance(&e, &owner, &spender, amount, expiration_ledger);
+    }
+
+    /// Lowers an allowance by `amount`, saturating at zero.
+    pub fn decrease_allowance(e: Env, owner: Address, spender: Address, amount: i128) {
+        allowance::decrease_allowance(&e, &owner, &spender, amount);
     }
 
     // ---- Escrow ---------------------------------------------------------
