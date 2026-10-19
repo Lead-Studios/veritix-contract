@@ -359,3 +359,177 @@ fn the_decrement_is_per_owner_and_spender_pair() {
     assert_eq!(f.client.allowance(&one, &spender), 300);
     assert_eq!(f.client.allowance(&two, &spender), 500);
 }
+
+// ---- increase_allowance / decrease_allowance ------------------------------
+
+#[test]
+fn increase_allowance_tops_up_a_live_grant_and_keeps_its_expiry() {
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &500, &1_000_000);
+
+    // The second expiry is deliberately different: an increase must not
+    // silently extend or shorten the window the owner chose.
+    f.client.increase_allowance(&holder, &spender, &200, &2_000_000);
+
+    assert_eq!(f.client.allowance(&holder, &spender), 700);
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 1_000_000);
+}
+
+#[test]
+fn increase_allowance_creates_a_grant_when_none_is_live() {
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+
+    // No approval first: this call is the whole grant.
+    f.client.increase_allowance(&holder, &spender, &300, &1_000_000);
+
+    assert_eq!(f.client.allowance(&holder, &spender), 300);
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 1_000_000);
+}
+
+#[test]
+fn increase_allowance_ignores_an_expired_grant_and_starts_a_new_one() {
+    // An expired grant must not be revived by topping it up; the increase
+    // starts from the supplied expiry instead.
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &500, &10);
+
+    f.e.ledger().set_sequence_number(11);
+    f.client.increase_allowance(&holder, &spender, &200, &1_000_000);
+
+    assert_eq!(f.client.allowance(&holder, &spender), 200);
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 1_000_000);
+}
+
+#[test]
+fn increase_allowance_refuses_a_negative_amount() {
+    // A negative increase is a decrease; letting it through here would make the
+    // two helpers interchangeable and the expiry rules ambiguous.
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &500, &1_000_000);
+
+    assert!(panics(|| {
+        f.client.increase_allowance(&holder, &spender, &-1, &1_000_000);
+    }));
+    assert_eq!(f.client.allowance(&holder, &spender), 500);
+}
+
+#[test]
+fn increase_allowance_refuses_a_past_expiry_when_creating_a_grant() {
+    // `approve` already refuses this for a fresh grant; the delta helper must
+    // not become a way around that check.
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+
+    f.e.ledger().set_sequence_number(100);
+    assert!(panics(|| {
+        f.client.increase_allowance(&holder, &spender, &100, &50);
+    }));
+}
+
+#[test]
+fn decrease_allowance_lowers_the_grant_and_keeps_its_expiry() {
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &500, &1_000_000);
+
+    f.client.decrease_allowance(&holder, &spender, &200);
+
+    assert_eq!(f.client.allowance(&holder, &spender), 300);
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 1_000_000);
+}
+
+#[test]
+fn decrease_allowance_saturates_at_zero_instead_of_underflowing() {
+    // The failure this guards against is a wrap: 100 - 500 in i128 is a large
+    // negative, and a negative allowance would read as *more* permission than
+    // the owner granted rather than none at all.
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let receiver = Address::generate(&f.e);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &100, &1_000_000);
+
+    f.client.decrease_allowance(&holder, &spender, &500);
+
+    assert_eq!(f.client.allowance(&holder, &spender), 0);
+
+    // A grant reduced to zero is revoked, so it can no longer be spent.
+    assert!(panics(|| {
+        f.client.transfer_from(&spender, &holder, &receiver, &1);
+    }));
+    assert_eq!(f.client.balance(&holder), 1_000);
+}
+
+#[test]
+fn decrease_allowance_refuses_a_negative_amount() {
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &500, &1_000_000);
+
+    assert!(panics(|| {
+        f.client.decrease_allowance(&holder, &spender, &-50);
+    }));
+    assert_eq!(f.client.allowance(&holder, &spender), 500);
+}
+
+#[test]
+fn allowance_expiration_reports_the_stored_expiry_and_zero_when_unset() {
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let receiver = Address::generate(&f.e);
+    let spender = Address::generate(&f.e);
+
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 0);
+
+    f.client.approve(&holder, &spender, &500, &4_321);
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 4_321);
+
+    // A spend reduces the amount, never the deadline.
+    f.client.transfer_from(&spender, &holder, &receiver, &100);
+    assert_eq!(f.client.allowance_expiration(&holder, &spender), 4_321);
+}
+
+// ---- transfer_from -------------------------------------------------------
+
+#[test]
+fn transfer_from_spends_the_allowance_before_moving_the_tokens() {
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let receiver = Address::generate(&f.e);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &300, &1_000_000);
+
+    f.client.transfer_from(&spender, &holder, &receiver, &300);
+
+    assert_eq!(f.client.allowance(&holder, &spender), 0);
+    assert_eq!(f.client.balance(&holder), 700);
+    assert_eq!(f.client.balance(&receiver), 300);
+}
+
+#[test]
+fn transfer_from_moves_nothing_when_the_allowance_is_insufficient() {
+    // The allowance is consumed before the transfer, so an over-large spend
+    // aborts before the recipient is paid.
+    let f = Fixture::new();
+    let holder = f.fund(1_000);
+    let receiver = Address::generate(&f.e);
+    let spender = Address::generate(&f.e);
+    f.client.approve(&holder, &spender, &100, &1_000_000);
+
+    assert!(panics(|| {
+        f.client.transfer_from(&spender, &holder, &receiver, &101);
+    }));
+    assert_eq!(f.client.balance(&receiver), 0);
+    assert_eq!(f.client.balance(&holder), 1_000);
+}

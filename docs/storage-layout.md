@@ -47,8 +47,9 @@ persistent.
 | `Symbol` | The token symbol. | Persistent |
 | `Decimals` | The number of decimals the token uses. | Persistent |
 | `Escrow(u64)` | An escrow held under its id, for lifecycle and settlement tracking. | Persistent |
+| `EscrowRecord(u32)` | An escrow record held under its id. | Persistent |
 | `EscrowCount` | Number of escrows created so far (also the next escrow id). | Persistent |
-| `EscrowValueLocked` | Total token amount still held across all active escrows. | Persistent |
+| `EscrowValueLocked(Address)` | Total token amount still held across all active escrows for a given token. | Persistent |
 | `Split(u64)` | A payment split held under its id. | Persistent |
 | `RecurringHistory(u64)` | The retained execution history for a recurring schedule. | Persistent |
 | `PayerRecurrings(Address)` | Recurring schedule ids indexed by payer. | Persistent |

@@ -27,6 +27,8 @@ pub enum DataKey {
     AllowanceSpenders(Address),
     /// The portion of an account's balance held by an active escrow.
     EscrowLocked(Address),
+    /// Every account that currently holds a non-zero balance, in first-credit order.
+    Holders,
 
     // --- Compliance ----------------------------------------------------------
     /// Whether the whole contract is paused.
@@ -35,6 +37,8 @@ pub enum DataKey {
     WhitelistEnabled,
     /// Whether an account is frozen and cannot move tokens.
     Frozen(Address),
+    /// Whether an account is whitelisted.
+    Whitelisted(Address),
     /// Whether an account is authorized to move tokens. Absent means authorized.
     Authorized(Address),
 
@@ -55,15 +59,17 @@ pub enum DataKey {
     // --- Escrows and disputes ------------------------------------------------
     /// An escrow held under its id, for lifecycle and settlement tracking.
     Escrow(u64),
+    /// An escrow held under its id (u32).
+    EscrowRecord(u32),
     /// Number of escrows created so far (also the next escrow id).
     EscrowCount,
-    /// Total token amount still held across all active escrows.
-    EscrowValueLocked,
+    /// Total token amount still held across all active escrows for a given token.
+    EscrowValueLocked(Address),
     /// Escrow ids created by a depositor, in creation order.
     DepositorEscrows(Address),
     /// Escrow ids owed to a beneficiary, in creation order.
     BeneficiaryEscrows(Address),
-/// A payment split held under its id.
+    /// A payment split held under its id.
     Split(u64),
     /// The retained execution history for a recurring schedule.
     RecurringHistory(u64),
@@ -73,7 +79,7 @@ pub enum DataKey {
     PayeeRecurrings(Address),
     /// The dispute record open over an escrow, keyed by escrow id.
     Dispute(u64),
-/// An authorised recurring payment, keyed by recurring payment id.
+    /// An authorised recurring payment, keyed by recurring payment id.
     Recurring(u64),
     /// Number of recurring schedules created so far (also the next id).
     RecurringCount,
@@ -83,6 +89,14 @@ pub enum DataKey {
     MultiEscrow(u64),
     /// Number of multi-escrows created so far (also the next id).
     MultiEscrowCount,
+    /// Whether an account is whitelisted.
+    Whitelisted(Address),
+    /// Monotonically increasing counter / nonce per address.
+    Counter(Address),
+    /// Dispute escrow ids indexed by claimant.
+    ClaimantDisputes(Address),
+    /// All escrow ids that have a dispute.
+    DisputeIds,
 }
 
 /// Where an escrow is in its lifecycle.
@@ -210,7 +224,7 @@ pub struct DisputeRecord {
     /// Who raised the dispute.
     pub claimant: Address,
     /// The escrow this dispute is over.
-    pub escrow_id: u64,
+    pub escrow_id: u32,
     /// Current lifecycle state.
     pub status: DisputeStatus,
     /// Ledger at which the dispute was raised, for expiry and age checks.

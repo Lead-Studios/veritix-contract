@@ -28,3 +28,34 @@ pub fn disable_whitelist(e: &Env, admin_addr: &Address) {
 		.instance()
 		.set(&DataKey::WhitelistEnabled, &false);
 }
+
+/// Adds `account` to the whitelist. Admin-only.
+pub fn add_to_whitelist(e: &Env, admin_addr: &Address, account: &Address) {
+	admin::check_admin(e, admin_addr);
+	e.storage()
+		.persistent()
+		.set(&DataKey::Whitelisted(account.clone()), &true);
+}
+
+/// Removes `account` from the whitelist. Admin-only.
+pub fn remove_from_whitelist(e: &Env, admin_addr: &Address, account: &Address) {
+	admin::check_admin(e, admin_addr);
+	e.storage()
+		.persistent()
+		.remove(&DataKey::Whitelisted(account.clone()));
+}
+
+/// Whether `account` is whitelisted.
+pub fn is_whitelisted(e: &Env, account: &Address) -> bool {
+	e.storage()
+		.persistent()
+		.get(&DataKey::Whitelisted(account.clone()))
+		.unwrap_or(false)
+}
+
+/// Panics when whitelist is enabled and `account` is not whitelisted.
+pub fn require_whitelisted(e: &Env, account: &Address) {
+	if is_whitelist_enabled(e) && !is_whitelisted(e, account) {
+		panic!("NotWhitelisted: account is not whitelisted");
+	}
+}
