@@ -27,6 +27,8 @@ pub enum DataKey {
     AllowanceSpenders(Address),
     /// The portion of an account's balance held by an active escrow.
     EscrowLocked(Address),
+    /// Every account that currently holds a non-zero balance, in first-credit order.
+    Holders,
 
     // --- Compliance ----------------------------------------------------------
     /// Whether the whole contract is paused.

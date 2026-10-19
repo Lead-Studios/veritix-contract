@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, symbol_short, Address, Bytes, Env};
 
 /// New tokens were credited to `to`.
 ///
@@ -26,12 +26,18 @@ pub struct Transfer {
     pub amount: i128,
 }
 
-/// Tokens were clawed back from `from` by the admin.
+/// Tokens were clawed back from `from` by `admin`.
 ///
-/// Topics are `["clawback", from: Address]` and the data is `[amount: i128]`.
+/// Topics are `["clawback", admin: Address, from: Address]` and the data is
+/// `[amount: i128]`. The admin rides along as a topic so an auditor can filter
+/// clawbacks by the account that performed them, and a clawback stays distinct
+/// from a burn: an admin recovery and a holder's own burn both reduce supply,
+/// and the two must be tellable apart.
 #[contractevent(data_format = "vec")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Clawback {
+    #[topic]
+    pub admin: Address,
     #[topic]
     pub from: Address,
     pub amount: i128,
@@ -167,4 +173,29 @@ pub struct AllowancesRevoked {
     #[topic]
     pub owner: Address,
     pub count: u32,
+}
+
+/// The largest memo a transfer may carry, in bytes.
+///
+/// The standard sets no limit, but the memo is paid for by every reader of the
+/// ledger, so it is capped rather than left to the caller's generosity.
+pub const MAX_MEMO_BYTES: u32 = 64;
+
+/// Publishes a `transfer` event with the memo appended to the data.
+///
+/// The standard `transfer` topics are reused and the data becomes
+/// `[amount: i128, memo: Bytes]`: a memo is extra information about a transfer,
+/// not a different kind of transfer, so a wallet that only parses `transfer`
+/// still shows the movement. This is published by hand rather than through a
+/// `#[contractevent]` struct because the macro derives its symbol from the
+/// struct name, and this event's symbol must be `transfer`.
+pub fn publish_transfer_with_memo(
+    e: &Env,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+    memo: &Bytes,
+) {
+    e.events()
+        .publish((symbol_short!("transfer"), from, to), (amount, memo));
 }
