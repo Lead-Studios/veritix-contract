@@ -46,6 +46,8 @@ pub mod dispute_stats;
 pub mod emergency;
 pub mod escrow;
 pub mod events;
+pub mod fee;
+pub mod info;
 pub mod metadata;
 pub mod multi_escrow;
 pub mod recurring;

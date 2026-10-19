@@ -13,7 +13,10 @@ pub fn total_supply(e: &Env) -> i128 {
 
 /// The configured hard cap, or 0 when supply is uncapped.
 pub fn max_supply(e: &Env) -> i128 {
-    e.storage().persistent().get(&DataKey::MaxSupply).unwrap_or(0)
+    e.storage()
+        .persistent()
+        .get(&DataKey::MaxSupply)
+        .unwrap_or(0)
 }
 
 /// Tokens held by `account`. An absent key means a zero balance.
@@ -45,7 +48,10 @@ pub fn credit(e: &Env, account: &Address, amount: i128) {
 pub fn debit(e: &Env, account: &Address, amount: i128) {
     let balance = balance_of(e, account);
     if balance < amount {
-        panic!("InsufficientBalance: {} available, {} required", balance, amount);
+        panic!(
+            "InsufficientBalance: {} available, {} required",
+            balance, amount
+        );
     }
     let new_balance = balance - amount;
     if new_balance == 0 {
@@ -74,7 +80,10 @@ pub fn increase_supply(e: &Env, amount: i128) {
         .unwrap_or_else(|| panic!("SupplyOverflow: minting {} would overflow i128", amount));
     let cap = max_supply(e);
     if cap > 0 && new_supply > cap {
-        panic!("SupplyCapExceeded: {} would exceed the cap of {}", new_supply, cap);
+        panic!(
+            "SupplyCapExceeded: {} would exceed the cap of {}",
+            new_supply, cap
+        );
     }
     e.storage()
         .persistent()
@@ -111,6 +120,13 @@ pub fn mint(e: &Env, to: &Address, amount: i128) {
 /// Panics on a non-positive `amount` or when `from` holds less than `amount`.
 pub fn transfer(e: &Env, from: &Address, to: &Address, amount: i128) {
     require_positive_amount(amount);
+    crate::control::require_not_paused(e);
+    crate::control::require_not_frozen(e, from);
+    crate::control::require_not_frozen(e, to);
+    crate::authorization::require_authorized(e, from);
+    crate::authorization::require_authorized(e, to);
+    crate::whitelist::require_whitelisted(e, from);
+    crate::whitelist::require_whitelisted(e, to);
     debit(e, from, amount);
     credit(e, to, amount);
     Transfer {
