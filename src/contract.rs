@@ -21,6 +21,11 @@ fn initialize_state(e: &Env, admin_addr: &Address, meta: &TokenMetadata) {
 
 #[contractimpl]
 impl VeriTixPay {
+    /// Atomic constructor running at deploy time.
+    pub fn __constructor(e: Env, admin_addr: Address) {
+        initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+    }
+
     /// Sets the admin and the default token metadata.
     ///
     /// One-shot: a second call is rejected rather than silently replacing the
@@ -28,6 +33,12 @@ impl VeriTixPay {
     /// point below.
     pub fn initialize(e: Env, admin_addr: Address) {
         initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+    }
+
+    /// Sets the admin, default metadata, and a hard supply cap.
+    pub fn initialize_with_max_supply(e: Env, admin_addr: Address, max_supply: i128) {
+        initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+        admin::set_max_supply(&e, max_supply);
     }
 
     /// Sets the admin and caller-supplied token metadata.
@@ -47,6 +58,17 @@ impl VeriTixPay {
                 decimals,
             },
         );
+    }
+
+    /// Sets whether `account` is authorized to move tokens. Admin-only.
+    pub fn set_authorized(e: Env, admin_addr: Address, account: Address, authorized: bool) {
+        admin::check_admin(&e, &admin_addr);
+        crate::authorization::set_authorized(&e, &account, authorized);
+    }
+
+    /// Whether `account` is authorized to move tokens.
+    pub fn is_authorized(e: Env, account: Address) -> bool {
+        crate::authorization::is_authorized(&e, &account)
     }
 
     /// True once an admin has been stored.
@@ -118,6 +140,7 @@ impl VeriTixPay {
     /// Moves `amount` of tokens from `from` to `to`.
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
+        crate::authorization::require_authorized(&e, &from);
         balance::transfer(&e, &from, &to, amount);
     }
 
