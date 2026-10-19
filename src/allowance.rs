@@ -44,6 +44,20 @@ pub fn allowance(e: &Env, from: &Address, spender: &Address) -> i128 {
     }
 }
 
+/// The ledger the `owner`/`spender` allowance expires on, or 0 once it has.
+///
+/// An expired allowance reports `0` rather than its stale deadline: the two
+/// figures are only ever read together, and a live-looking deadline beside a
+/// zero amount is a trap for a client that reads the deadline alone.
+pub fn allowance_expiration(e: &Env, from: &Address, spender: &Address) -> u32 {
+    let stored = load(e, from, spender);
+    if is_expired(e, &stored) {
+        0
+    } else {
+        stored.expiration_ledger
+    }
+}
+
 /// Every spender `owner` currently holds a live allowance with, in grant order.
 pub fn spenders_for(e: &Env, owner: &Address) -> Vec<Address> {
     e.storage()

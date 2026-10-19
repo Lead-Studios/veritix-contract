@@ -82,6 +82,25 @@ pub fn increase_supply(e: &Env, amount: i128) {
         .set(&DataKey::TotalSupply, &new_supply);
 }
 
+/// Removes `amount` from total supply.
+///
+/// The mirror of [`increase_supply`]: supply only ever shrinks through burns
+/// and clawbacks, so the counter and the sum of balances cannot drift apart.
+/// The cap is not re-checked — shrinking supply can never violate it.
+///
+/// # Panics
+///
+/// Panics with `SupplyUnderflow` when `amount` exceeds the current supply,
+/// which would mean burning tokens that were never minted.
+pub fn decrease_supply(e: &Env, amount: i128) {
+    let new_supply = total_supply(e)
+        .checked_sub(amount)
+        .unwrap_or_else(|| panic!("SupplyUnderflow: burning {} would drive supply below zero", amount));
+    e.storage()
+        .persistent()
+        .set(&DataKey::TotalSupply, &new_supply);
+}
+
 /// Brings `amount` of new tokens into circulation for `to`.
 ///
 /// This is the only place that credits balances and grows supply together, so
@@ -117,6 +136,27 @@ pub fn transfer(e: &Env, from: &Address, to: &Address, amount: i128) {
     Transfer {
         from: from.clone(),
         to: to.clone(),
+        amount,
+    }
+    .publish(e);
+}
+
+/// Takes `amount` of `from`'s tokens out of circulation.
+///
+/// The debit runs before the supply shrinks so an insufficient balance aborts
+/// before the counter moves, and the amount is validated before any balance is
+/// read — the same order [`transfer`] uses.
+///
+/// # Panics
+///
+/// Panics on a non-positive `amount`, when `from` holds less than `amount`,
+/// and through [`decrease_supply`] when the supply counter would go negative.
+pub fn burn(e: &Env, from: &Address, amount: i128) {
+    require_positive_amount(amount);
+    debit(e, from, amount);
+    decrease_supply(e, amount);
+    Burn {
+        from: from.clone(),
         amount,
     }
     .publish(e);

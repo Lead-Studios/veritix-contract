@@ -1,6 +1,6 @@
 use crate::metadata::{self, TokenMetadata};
 use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution, RecurringPayment};
-use crate::{admin, balance, escrow, recurring, whitelist};
+use crate::{admin, allowance, balance, escrow, recurring, whitelist};
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
@@ -119,6 +119,49 @@ impl VeriTixPay {
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         balance::transfer(&e, &from, &to, amount);
+    }
+
+    /// The tokens `spender` may still move on `from`'s behalf.
+    ///
+    /// Reads as `0` once the allowance has expired: an expired grant is spent,
+    /// not an error.
+    pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
+        allowance::allowance(&e, &from, &spender)
+    }
+
+    /// The ledger `from`'s allowance to `spender` expires on, or 0 once it has.
+    pub fn allowance_expiration(e: Env, from: Address, spender: Address) -> u32 {
+        allowance::allowance_expiration(&e, &from, &spender)
+    }
+
+    /// Moves `amount` of tokens from `from` to `to` under `spender`'s
+    /// allowance.
+    ///
+    /// The spender authorizes the call and the allowance is consumed before the
+    /// tokens move, so a spender can never move more than `from` approved — and
+    /// a transfer that then fails on the balance reverts the allowance
+    /// reduction with it.
+    pub fn transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        spender.require_auth();
+        allowance::consume_allowance(&e, &from, &spender, amount);
+        balance::transfer(&e, &from, &to, amount);
+    }
+
+    /// Burns `amount` of `from`'s tokens, taking them out of circulation.
+    pub fn burn(e: Env, from: Address, amount: i128) {
+        from.require_auth();
+        balance::burn(&e, &from, amount);
+    }
+
+    /// Burns `amount` of `from`'s tokens under `spender`'s allowance.
+    ///
+    /// The allowance is consumed first, for the same reason
+    /// [`transfer_from`](Self::transfer_from) does: a spender acting on
+    /// `from`'s behalf must be bounded by what `from` approved.
+    pub fn burn_from(e: Env, spender: Address, from: Address, amount: i128) {
+        spender.require_auth();
+        allowance::consume_allowance(&e, &from, &spender, amount);
+        balance::burn(&e, &from, amount);
     }
 
     // ---- Escrow ---------------------------------------------------------
