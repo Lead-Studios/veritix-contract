@@ -38,6 +38,7 @@ use soroban_sdk as _;
 pub mod admin;
 pub mod allowance;
 pub mod authorization;
+pub mod balance;
 pub mod contract;
 pub mod control;
 pub mod dispute;

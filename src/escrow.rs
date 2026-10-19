@@ -124,7 +124,7 @@ fn increase_value_locked(e: &Env, amount: i128) {
 /// one a user has already trusted with the escrow. The subtraction is checked
 /// rather than saturating so a bug surfaces here instead of as a silently wrong
 /// total.
-fn decrease_value_locked(e: &Env, amount: i128) {
+pub fn decrease_value_locked(e: &Env, amount: i128) {
     let current = value_locked(e);
     let new_total = current.checked_sub(amount).unwrap_or_else(|| {
         panic!(
@@ -247,7 +247,7 @@ fn require_settlement_authority(e: &Env, caller: &Address, record: &EscrowRecord
 }
 
 /// Sends `amount` of `token` out of the contract to `to`.
-fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
+pub fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
     token::TokenClient::new(e, token_address).transfer(
         &e.current_contract_address(),
         to,
