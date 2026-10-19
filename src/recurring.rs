@@ -9,6 +9,9 @@ use crate::validation::require_positive_amount;
 /// Maximum number of successful charges retained for each schedule.
 pub const MAX_RECURRING_HISTORY: u32 = 100;
 
+/// Maximum number of recurring schedules indexed per address (payer or payee).
+pub const MAX_RECURRING_PER_ADDRESS: u32 = 100;
+
 /// Creates a recurring schedule and indexes it for both participants.
 pub fn create(
     e: &Env,
@@ -59,18 +62,38 @@ pub fn create(
         .set(&DataKey::RecurringCount, &next_id);
 
     let mut payer_ids = recurring_ids_for_payer(e, payer);
+    if payer_ids.len() >= MAX_RECURRING_PER_ADDRESS {
+        panic!("RecurringIndexFull: payer has reached the recurring schedule limit");
+    }
     payer_ids.push_back(id);
     e.storage()
         .persistent()
         .set(&DataKey::PayerRecurrings(payer.clone()), &payer_ids);
 
     let mut payee_ids = recurring_ids_for_payee(e, payee);
+    if payee_ids.len() >= MAX_RECURRING_PER_ADDRESS {
+        panic!("RecurringIndexFull: payee has reached the recurring schedule limit");
+    }
     payee_ids.push_back(id);
     e.storage()
         .persistent()
         .set(&DataKey::PayeeRecurrings(payee.clone()), &payee_ids);
 
     id
+}
+
+/// Reads a recurring schedule by id.
+pub fn get_recurring(e: &Env, recurring_id: u64) -> RecurringPayment {
+    e.storage()
+        .persistent()
+        .get::<_, RecurringPayment>(&DataKey::Recurring(recurring_id))
+        .unwrap_or_else(|| panic!("RecurringNotFound: payment {} does not exist", recurring_id))
+}
+
+/// Whether the recurring schedule at `recurring_id` is active and not paused.
+pub fn is_recurring_active(e: &Env, recurring_id: u64) -> bool {
+    let schedule = get_recurring(e, recurring_id);
+    schedule.active && !schedule.paused
 }
 
 /// Returns all schedules created by `payer`.

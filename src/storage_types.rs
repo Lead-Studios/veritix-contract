@@ -35,6 +35,8 @@ pub enum DataKey {
     WhitelistEnabled,
     /// Whether an account is frozen and cannot move tokens.
     Frozen(Address),
+    /// Whether an account is whitelisted.
+    Whitelisted(Address),
     /// Whether an account is authorized to move tokens. Absent means authorized.
     Authorized(Address),
 
