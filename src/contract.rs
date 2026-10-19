@@ -457,51 +457,30 @@ impl VeriTixPay {
         crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
     }
 
-    /// Adds a batch of accounts to the whitelist. Admin-only.
-    pub fn add_to_whitelist_batch(e: Env, admin: Address, accounts: Vec<Address>) {
-        crate::whitelist_batch::add_to_whitelist_batch(&e, &admin, accounts);
+    /// Admin-gated batch minting that returns the total minted.
+    pub fn mint_batch(e: Env, admin: Address, mints: Vec<(Address, i128)>) -> i128 {
+        crate::batch::mint_batch(&e, &admin, mints)
     }
 
-    /// Adds accounts to the whitelist with a sequence nonce. Admin-only. Reused nonce panics.
-    pub fn add_to_whitelist_signed(e: Env, admin: Address, accounts: Vec<Address>, nonce: u64) {
-        crate::whitelist_signed::add_to_whitelist_signed(&e, &admin, accounts, nonce);
+    /// Admin-gated batch clawback across multiple targets.
+    pub fn clawback_batch(e: Env, admin: Address, targets: Vec<(Address, i128)>) {
+        crate::batch::clawback_batch(&e, &admin, targets);
     }
 
-    /// Returns whether `account` is on the whitelist.
-    pub fn is_whitelisted(e: Env, account: Address) -> bool {
-        e.storage()
-            .persistent()
-            .get(&DataKey::Whitelisted(account))
-            .unwrap_or(false)
+    /// Admin-gated airdrop distributed evenly across current holders.
+    pub fn airdrop(e: Env, admin: Address, token: Address, total_amount: i128) {
+        crate::airdrop::airdrop(&e, &admin, &token, total_amount);
     }
 
-    /// Returns the current whitelist nonce for `admin`.
-    pub fn get_whitelist_nonce(e: Env, admin: Address) -> u64 {
-        crate::whitelist_signed::get_nonce(&e, &admin)
-    }
-
-    /// Returns `(open_count, resolved_count, expired_count)` across all disputes.
-    pub fn dispute_stats(e: Env) -> (u32, u32, u32) {
-        crate::dispute_stats::dispute_stats(&e)
-    }
-
-    /// Returns all disputes raised by `claimant`.
-    pub fn get_disputes_by_claimant(
-        e: Env,
-        claimant: Address,
-    ) -> Vec<crate::storage_types::DisputeRecord> {
-        crate::dispute_stats::get_disputes_by_claimant(&e, &claimant)
-    }
-
-    /// Emergency withdrawal of stranded tokens. Admin-only. Refuses to touch escrowed funds.
-    pub fn emergency_withdraw(
+    /// Distributes dividends pro rata to snapshot balances.
+    pub fn distribute_dividend(
         e: Env,
         admin: Address,
-        recipient: Address,
-        token: Address,
-        amount: i128,
+        snapshot_id: u32,
+        total: i128,
+        holders: Vec<Address>,
     ) {
-        crate::emergency::emergency_withdraw(&e, &admin, &recipient, &token, amount);
+        crate::dividend::distribute_dividend(&e, &admin, snapshot_id, total, holders);
     }
 }
 

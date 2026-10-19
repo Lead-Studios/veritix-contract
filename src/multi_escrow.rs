@@ -5,7 +5,6 @@
 //! atomic — either every leg is paid or the whole call reverts — so a
 //! beneficiary can never be skipped because a later leg failed.
 
-use crate::escrow::pay;
 use crate::events::{MultiEscrowCreated, MultiEscrowRefunded, MultiEscrowReleased};
 use crate::storage_types::{DataKey, MultiEscrowRecord, MultiEscrowStatus};
 use crate::validation::require_positive_amount;

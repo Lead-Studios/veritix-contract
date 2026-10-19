@@ -36,14 +36,15 @@ use soroban_sdk as _;
 // crate `pub` does not widen the wasm export surface — only `#[contractimpl]`
 // entry points are callable on-chain.
 pub mod admin;
+pub mod airdrop;
 pub mod allowance;
 pub mod authorization;
 pub mod balance;
+pub mod batch;
 pub mod contract;
 pub mod control;
 pub mod dispute;
-pub mod dispute_stats;
-pub mod emergency;
+pub mod dividend;
 pub mod escrow;
 pub mod events;
 pub mod fee;
