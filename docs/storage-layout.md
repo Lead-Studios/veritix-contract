@@ -21,26 +21,28 @@ the number of users belongs in persistent storage.
 
 ## Key reference
 
-Every `DataKey` variant currently defined in `src/storage_types.rs`. All keys are stored in persistent storage.
+Every `DataKey` variant currently defined in `src/storage_types.rs`. The fixed
+configuration keys live in instance storage; everything that grows with usage is
+persistent.
 
 | `DataKey` variant | Description | Durability |
 | --- | --- | --- |
-| `Admin` | Address holding admin authority. | Persistent |
+| `Admin` | Address holding admin authority. | Instance |
 | `PendingAdmin` | The administrator nominated by a two-step ownership transfer, if any. | Persistent |
 | `AdminActiveAfterLedger` | The ledger from which `PendingAdmin` becomes the active `Admin`. | Persistent |
 | `ClawbackCosigner` | The second signer required alongside the admin for a clawback. | Persistent |
-| `InitializedAtLedger` | The ledger at which the contract was initialized. | Persistent |
+| `InitializedAtLedger` | The ledger at which the contract was initialized. | Instance |
 | `Balance(Address)` | Token balance of a single account. | Persistent |
 | `BalanceOf(Address)` | Token balance key used by the balance module. | Persistent |
 | `Allowance(Address, Address)` | Spending allowance granted by `owner` to `spender`. | Persistent |
 | `AllowanceSpenders(Address)` | The spenders an owner currently has an allowance with, in grant order. | Persistent |
 | `EscrowLocked(Address)` | The portion of an account's balance held by an active escrow. | Persistent |
-| `Paused` | Whether the whole contract is paused. | Persistent |
-| `WhitelistEnabled` | Whether token holders must be whitelisted. | Persistent |
+| `Paused` | Whether the whole contract is paused. | Instance |
+| `WhitelistEnabled` | Whether token holders must be whitelisted. | Instance |
 | `Frozen(Address)` | Whether an account is frozen and cannot move tokens. | Persistent |
 | `Authorized(Address)` | Whether an account is authorized to move tokens. Absent means authorized. | Persistent |
-| `TotalSupply` | Total tokens in circulation. | Persistent |
-| `MaxSupply` | Hard supply cap. Unset or 0 means supply is uncapped. | Persistent |
+| `TotalSupply` | Total tokens in circulation. | Instance |
+| `MaxSupply` | Hard supply cap. Unset or 0 means supply is uncapped. | Instance |
 | `Name` | The token name. | Persistent |
 | `Symbol` | The token symbol. | Persistent |
 | `Decimals` | The number of decimals the token uses. | Persistent |

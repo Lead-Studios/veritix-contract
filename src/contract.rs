@@ -1,6 +1,8 @@
 use crate::metadata::{self, TokenMetadata};
-use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution, RecurringPayment};
-use crate::{admin, balance, escrow, recurring, whitelist};
+use crate::storage_types::{
+    bump_instance, DataKey, EscrowRecord, RecurringExecution, RecurringPayment,
+};
+use crate::{admin, allowance, balance, escrow, recurring, whitelist};
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
@@ -12,10 +14,8 @@ fn initialize_state(e: &Env, admin_addr: &Address, meta: &TokenMetadata) {
         panic!("AlreadyInitialized: contract state is locked");
     }
     admin_addr.require_auth();
-    e.storage().persistent().set(&DataKey::Admin, admin_addr);
-    e.storage()
-        .persistent()
-        .set(&DataKey::InitializedAtLedger, &e.ledger().sequence());
+    admin::set_admin(e, admin_addr);
+    admin::set_initialized_at(e, e.ledger().sequence());
     metadata::store(e, meta);
 }
 
@@ -27,6 +27,7 @@ impl VeriTixPay {
     /// admin, because the admin is the root of trust for every privileged entry
     /// point below.
     pub fn initialize(e: Env, admin_addr: Address) {
+        bump_instance(&e);
         initialize_state(&e, &admin_addr, &metadata::defaults(&e));
     }
 
@@ -38,6 +39,7 @@ impl VeriTixPay {
         symbol: String,
         decimals: u32,
     ) {
+        bump_instance(&e);
         initialize_state(
             &e,
             &admin_addr,
@@ -51,74 +53,148 @@ impl VeriTixPay {
 
     /// True once an admin has been stored.
     pub fn is_initialized(e: Env) -> bool {
+        bump_instance(&e);
         admin::is_initialized(&e)
     }
 
     /// The address currently holding admin authority.
     pub fn admin(e: Env) -> Address {
+        bump_instance(&e);
         admin::admin(&e)
     }
 
     /// Ledger on which the contract was initialized, 0 when it never was.
     pub fn initialized_at_ledger(e: Env) -> u32 {
+        bump_instance(&e);
         admin::initialized_at_ledger(&e)
+    }
+
+    /// Nominates `new_admin` as the next admin. Admin-only.
+    ///
+    /// The nomination changes nothing until the nominee accepts through
+    /// [`accept_admin`](Self::accept_admin): a one-step transfer to a mistyped
+    /// address would strand the contract with an admin nobody can sign for.
+    pub fn transfer_ownership(e: Env, new_admin: Address) {
+        bump_instance(&e);
+        admin::transfer_ownership(&e, &new_admin);
+    }
+
+    /// Completes a pending nomination: `new_admin` becomes the admin.
+    ///
+    /// Callable only by the nominated address, which must authorize the call
+    /// itself. The previous admin loses power on this call — there is no
+    /// overlap window in which two addresses both hold the role.
+    pub fn accept_admin(e: Env, new_admin: Address) {
+        bump_instance(&e);
+        admin::accept_admin(&e, &new_admin);
+    }
+
+    /// The nominated admin awaiting acceptance, if a rotation is in flight.
+    pub fn pending_admin(e: Env) -> Option<Address> {
+        bump_instance(&e);
+        admin::pending_admin(&e)
+    }
+
+    /// The ledger from which the pending nomination becomes (or became) the
+    /// admin, or 0 when no rotation has ever been proposed.
+    pub fn admin_active_after_ledger(e: Env) -> u32 {
+        bump_instance(&e);
+        admin::admin_active_after_ledger(&e)
+    }
+
+    /// Appoints `cosigner` as the second required signer for clawbacks.
+    /// Admin-only; the co-signer must differ from the admin.
+    pub fn set_clawback_cosigner(e: Env, admin_addr: Address, cosigner: Address) {
+        bump_instance(&e);
+        admin::set_clawback_cosigner(&e, &admin_addr, &cosigner);
+    }
+
+    /// The clawback co-signer, if one has been appointed.
+    pub fn read_clawback_cosigner(e: Env) -> Option<Address> {
+        bump_instance(&e);
+        admin::read_clawback_cosigner(&e)
     }
 
     /// Enables whitelist enforcement. Admin-only.
     pub fn enable_whitelist(e: Env, admin_addr: Address) {
+        bump_instance(&e);
         whitelist::enable_whitelist(&e, &admin_addr);
     }
 
     /// Disables whitelist enforcement. Admin-only.
     pub fn disable_whitelist(e: Env, admin_addr: Address) {
+        bump_instance(&e);
         whitelist::disable_whitelist(&e, &admin_addr);
     }
 
     /// Whether whitelist enforcement is enabled.
     pub fn is_whitelist_enabled(e: Env) -> bool {
+        bump_instance(&e);
         whitelist::is_whitelist_enabled(&e)
     }
 
     /// The token name.
     pub fn name(e: Env) -> String {
+        bump_instance(&e);
         metadata::load(&e).name
     }
 
     /// The token symbol.
     pub fn symbol(e: Env) -> String {
+        bump_instance(&e);
         metadata::load(&e).symbol
     }
 
     /// The number of decimals the token is scaled by.
     pub fn decimals(e: Env) -> u32 {
+        bump_instance(&e);
         metadata::load(&e).decimals
     }
 
     /// Tokens held by `account`; 0 for an address that has never been credited.
     pub fn balance(e: Env, account: Address) -> i128 {
+        bump_instance(&e);
         balance::balance_of(&e, &account)
     }
 
     /// Tokens in circulation.
     pub fn total_supply(e: Env) -> i128 {
+        bump_instance(&e);
         balance::total_supply(&e)
     }
 
     /// The hard cap on total supply, or 0 when supply is unlimited.
     pub fn max_supply(e: Env) -> i128 {
+        bump_instance(&e);
         balance::max_supply(&e)
     }
 
     /// Mints `amount` new tokens to `to`. Admin-only and supply-capped.
     pub fn mint(e: Env, admin_addr: Address, to: Address, amount: i128) {
+        bump_instance(&e);
         admin::check_admin(&e, &admin_addr);
         balance::mint(&e, &to, amount);
     }
 
     /// Moves `amount` of tokens from `from` to `to`.
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
+        bump_instance(&e);
         from.require_auth();
         balance::transfer(&e, &from, &to, amount);
+    }
+
+    /// Authorizes `spender` to move up to `amount` of `from`'s tokens until
+    /// `expiration_ledger`.
+    ///
+    /// `from` authorizes the call: an approval is a delegation of the owner's
+    /// own authority, and a function that let anyone approve on someone else's
+    /// behalf would be a drain, not a delegation. The allowance module
+    /// overwrites rather than accumulates, rejects a non-zero amount with an
+    /// expiration already in the past, and treats a zero amount as a revoke.
+    pub fn approve(e: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) {
+        bump_instance(&e);
+        from.require_auth();
+        allowance::approve(&e, &from, &spender, amount, expiration_ledger);
     }
 
     // ---- Escrow ---------------------------------------------------------
@@ -136,6 +212,7 @@ impl VeriTixPay {
         amount: i128,
         deadline_ledger: u32,
     ) -> u32 {
+        bump_instance(&e);
         escrow::create(&e, &depositor, &beneficiary, &token, amount, deadline_ledger)
     }
 
@@ -144,6 +221,7 @@ impl VeriTixPay {
     /// Settlable by the depositor or the admin, and only while the escrow is
     /// `Active`.
     pub fn release_escrow(e: Env, caller: Address, escrow_id: u32) {
+        bump_instance(&e);
         escrow::release(&e, &caller, escrow_id);
     }
 
@@ -152,43 +230,51 @@ impl VeriTixPay {
     /// Settlable by the depositor or the admin, and only while the escrow is
     /// `Active`.
     pub fn refund_escrow(e: Env, caller: Address, escrow_id: u32) {
+        bump_instance(&e);
         escrow::refund(&e, &caller, escrow_id);
     }
 
     /// Pays `amount` of the held funds to the beneficiary, leaving the escrow
     /// `Active` if anything is still owed.
     pub fn release_partial_escrow(e: Env, caller: Address, escrow_id: u32, amount: i128) {
+        bump_instance(&e);
         escrow::release_partial(&e, &caller, escrow_id, amount);
     }
 
     /// A page of escrow ids created by `depositor` (at most 50 per call).
     pub fn get_escrows_by_depositor(e: Env, depositor: Address, start: u32, limit: u32) -> Vec<u32> {
+        bump_instance(&e);
         escrow::ids_page(&e, &DataKey::DepositorEscrows(depositor), start, limit)
     }
 
     /// A page of escrow ids owed to `beneficiary` (at most 50 per call).
     pub fn get_escrows_by_beneficiary(e: Env, beneficiary: Address, start: u32, limit: u32) -> Vec<u32> {
+        bump_instance(&e);
         escrow::ids_page(&e, &DataKey::BeneficiaryEscrows(beneficiary), start, limit)
     }
 
     /// Total token amount still held across all active escrows.
     pub fn escrowed_total(e: Env) -> i128 {
+        bump_instance(&e);
         escrow::escrowed_total(&e)
     }
 
     /// `(total locked, active count, settled count)` across all escrows.
     pub fn escrow_stats(e: Env) -> (i128, u32, u32) {
+        bump_instance(&e);
         escrow::stats(&e)
     }
 
     /// Reassigns an unsettled escrow to a new beneficiary. Depositor only.
     pub fn transfer_escrow_beneficiary(e: Env, depositor: Address, escrow_id: u32, new_beneficiary: Address) {
+        bump_instance(&e);
         escrow::transfer_beneficiary(&e, &depositor, escrow_id, &new_beneficiary);
     }
 
     /// Creates one escrow per recipient of split `split_id` for its share and
     /// returns the new escrow ids.
     pub fn split_to_escrow(e: Env, sender: Address, split_id: u64, deadline_ledger: u32) -> Vec<u32> {
+        bump_instance(&e);
         crate::splitter::split_to_escrow(&e, &sender, split_id, deadline_ledger)
     }
 
@@ -199,16 +285,19 @@ impl VeriTixPay {
     /// Panics when no escrow exists at `escrow_id`, so a client cannot mistake
     /// "never created" for a record of zeros.
     pub fn get_escrow(e: Env, escrow_id: u32) -> EscrowRecord {
+        bump_instance(&e);
         escrow::record(&e, escrow_id)
     }
 
     /// Ledgers elapsed since `escrow_id` was created.
     pub fn get_escrow_age(e: Env, escrow_id: u32) -> u32 {
+        bump_instance(&e);
         escrow::age(&e, escrow_id)
     }
 
     /// Reads up to 50 escrows in one call, in order, with `None` for missing ids.
     pub fn get_escrows_batch(e: Env, ids: Vec<u32>) -> Vec<Option<EscrowRecord>> {
+        bump_instance(&e);
         escrow::records_batch(&e, &ids)
     }
 
@@ -219,38 +308,45 @@ impl VeriTixPay {
     /// Panics when no escrow exists at `escrow_id`, for the same reason
     /// [`get_escrow`] does.
     pub fn is_escrow_settled(e: Env, escrow_id: u32) -> bool {
+        bump_instance(&e);
         escrow::is_settled(&e, escrow_id)
     }
 
     /// Releases `escrow_id` to its beneficiary once its deadline has passed.
     /// Callable by anyone; refused while a dispute is open.
     pub fn trigger_auto_release(e: Env, escrow_id: u32) {
+        bump_instance(&e);
         escrow::auto_release(&e, escrow_id);
     }
 
     /// Admin escape hatch: pays the remainder of `escrow_id` to `winner`, which
     /// must be the depositor or the beneficiary.
     pub fn admin_settle_escrow(e: Env, admin: Address, escrow_id: u32, winner: Address) {
+        bump_instance(&e);
         escrow::admin_settle(&e, &admin, escrow_id, &winner);
     }
 
     /// Raises a dispute over `escrow_id`, freezing it until a ruling is final.
     pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u64, resolver: Option<Address>) {
+        bump_instance(&e);
         crate::dispute::raise_dispute(&e, &claimant, escrow_id, resolver);
     }
 
     /// Whether a dispute on `escrow_id` is still live and blocking settlement.
     pub fn is_dispute_open(e: Env, escrow_id: u64) -> bool {
+        bump_instance(&e);
         crate::dispute::is_dispute_open(&e, escrow_id)
     }
 
     /// The dispute record for `escrow_id`.
     pub fn get_dispute(e: Env, escrow_id: u64) -> crate::storage_types::DisputeRecord {
+        bump_instance(&e);
         crate::dispute::get_dispute(&e, escrow_id)
     }
 
     /// The retained successful charge history for a recurring schedule.
     pub fn get_recurring_history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
+        bump_instance(&e);
         recurring::get_recurring_history(&e, recurring_id)
     }
 
@@ -263,42 +359,50 @@ impl VeriTixPay {
         amount: i128,
         interval_ledgers: u32,
     ) -> u64 {
+        bump_instance(&e);
         recurring::create(&e, &payer, &payee, &token, amount, interval_ledgers)
     }
 
     /// All recurring schedules created by `payer`.
     pub fn get_recurring_by_payer(e: Env, payer: Address) -> Vec<RecurringPayment> {
+        bump_instance(&e);
         recurring::get_recurring_by_payer(&e, &payer)
     }
 
     /// Recurring schedule ids associated with `payee`.
     pub fn recurring_ids_for_payee(e: Env, payee: Address) -> Vec<u64> {
+        bump_instance(&e);
         recurring::recurring_ids_for_payee(&e, &payee)
     }
 
     /// Number of recurring schedules associated with `payee`.
     pub fn recurring_count_for_payee(e: Env, payee: Address) -> u32 {
+        bump_instance(&e);
         recurring::recurring_count_for_payee(&e, &payee)
     }
 
     /// The arbiter picks a winner: records the ruling and opens the appeal
     /// window; a second call after the window lapses settles and pays.
     pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+        bump_instance(&e);
         crate::dispute::resolve_dispute(&e, resolver, escrow_id, winner);
     }
 
     /// The losing party escalates a ruling within the appeal window.
     pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u64) {
+        bump_instance(&e);
         crate::dispute::appeal_dispute(&e, &caller, escrow_id);
     }
 
     /// The final, unappealable ruling: settles the escrow and pays the winner.
     pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+        bump_instance(&e);
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
 /// Executes one due charge from an authorised recurring payment.
     pub fn execute_recurring(e: Env, recurring_id: u64) {
+        bump_instance(&e);
         recurring::execute_recurring(&e, recurring_id);
     }
 
@@ -307,6 +411,7 @@ impl VeriTixPay {
     /// Admin-only. Disputes need a designated resolver before any of them can
     /// be settled.
     pub fn set_arbiter(e: Env, admin: Address, arbiter: Address) {
+        bump_instance(&e);
         crate::dispute::set_arbiter(&e, &admin, &arbiter);
     }
 
@@ -316,6 +421,7 @@ impl VeriTixPay {
     ///
     /// Panics with `ArbiterNotSet` when no arbiter has been configured.
     pub fn get_arbiter(e: Env) -> Address {
+        bump_instance(&e);
         crate::dispute::get_arbiter(&e)
     }
 
@@ -334,6 +440,7 @@ impl VeriTixPay {
         amounts: soroban_sdk::Vec<i128>,
         total: i128,
     ) -> u64 {
+        bump_instance(&e);
         crate::multi_escrow::create(&e, &depositor, &token, beneficiaries, amounts, total)
     }
 
@@ -343,6 +450,7 @@ impl VeriTixPay {
     ///
     /// Panics when no multi-escrow exists at `multi_escrow_id`.
     pub fn get_multi_escrow(e: Env, multi_escrow_id: u64) -> crate::storage_types::MultiEscrowRecord {
+        bump_instance(&e);
         crate::multi_escrow::record(&e, multi_escrow_id)
     }
 
@@ -352,6 +460,7 @@ impl VeriTixPay {
     ///
     /// Panics when no multi-escrow exists at `multi_escrow_id`.
     pub fn is_multi_escrow_settled(e: Env, multi_escrow_id: u64) -> bool {
+        bump_instance(&e);
         crate::multi_escrow::is_settled(&e, multi_escrow_id)
     }
 
@@ -362,6 +471,7 @@ impl VeriTixPay {
     /// Settlable by the depositor or the admin, and only while the record is
     /// `Active`.
     pub fn release_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
+        bump_instance(&e);
         crate::multi_escrow::release(&e, &caller, multi_escrow_id);
     }
 
@@ -371,6 +481,7 @@ impl VeriTixPay {
     /// Settlable by the depositor or the admin, and only while the record is
     /// `Active`.
     pub fn refund_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
+        bump_instance(&e);
         crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
     }
 }

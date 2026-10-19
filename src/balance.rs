@@ -5,16 +5,19 @@ use crate::validation::require_positive_amount;
 use soroban_sdk::{Address, Env};
 
 /// Tokens in circulation. An absent key means the contract has minted nothing.
+///
+/// The supply counters are contract-wide configuration, so they live in
+/// instance storage with the admin (see `docs/ttl.md`).
 pub fn total_supply(e: &Env) -> i128 {
     e.storage()
-        .persistent()
+        .instance()
         .get(&DataKey::TotalSupply)
         .unwrap_or(0)
 }
 
 /// The configured hard cap, or 0 when supply is uncapped.
 pub fn max_supply(e: &Env) -> i128 {
-    e.storage().persistent().get(&DataKey::MaxSupply).unwrap_or(0)
+    e.storage().instance().get(&DataKey::MaxSupply).unwrap_or(0)
 }
 
 /// Tokens held by `account`. An absent key means a zero balance.
@@ -78,7 +81,7 @@ pub fn increase_supply(e: &Env, amount: i128) {
         panic!("SupplyCapExceeded: {} would exceed the cap of {}", new_supply, cap);
     }
     e.storage()
-        .persistent()
+        .instance()
         .set(&DataKey::TotalSupply, &new_supply);
 }
 

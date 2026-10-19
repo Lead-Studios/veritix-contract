@@ -2,8 +2,11 @@ use crate::storage_types::DataKey;
 use soroban_sdk::{Address, Env};
 
 /// Whether the whole contract is currently paused.
+///
+/// The pause flag is contract-wide configuration, so it lives in instance
+/// storage alongside the admin and the supply counters (see `docs/ttl.md`).
 pub fn is_paused(e: &Env) -> bool {
-    e.storage().persistent().get(&DataKey::Paused).unwrap_or(false)
+    e.storage().instance().get(&DataKey::Paused).unwrap_or(false)
 }
 
 /// Panics while the contract is paused.
@@ -20,9 +23,9 @@ pub fn require_not_paused(e: &Env) {
 /// Pauses or resumes the contract.
 pub fn set_paused(e: &Env, paused: bool) {
     if paused {
-        e.storage().persistent().set(&DataKey::Paused, &true);
+        e.storage().instance().set(&DataKey::Paused, &true);
     } else {
-        e.storage().persistent().remove(&DataKey::Paused);
+        e.storage().instance().remove(&DataKey::Paused);
     }
 }
 
