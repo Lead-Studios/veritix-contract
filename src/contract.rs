@@ -21,6 +21,11 @@ fn initialize_state(e: &Env, admin_addr: &Address, meta: &TokenMetadata) {
 
 #[contractimpl]
 impl VeriTixPay {
+    /// Atomic constructor running at deploy time.
+    pub fn __constructor(e: Env, admin_addr: Address) {
+        initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+    }
+
     /// Sets the admin and the default token metadata.
     ///
     /// One-shot: a second call is rejected rather than silently replacing the
@@ -28,6 +33,12 @@ impl VeriTixPay {
     /// point below.
     pub fn initialize(e: Env, admin_addr: Address) {
         initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+    }
+
+    /// Sets the admin, default metadata, and a hard supply cap.
+    pub fn initialize_with_max_supply(e: Env, admin_addr: Address, max_supply: i128) {
+        initialize_state(&e, &admin_addr, &metadata::defaults(&e));
+        admin::set_max_supply(&e, max_supply);
     }
 
     /// Sets the admin and caller-supplied token metadata.
@@ -47,6 +58,17 @@ impl VeriTixPay {
                 decimals,
             },
         );
+    }
+
+    /// Sets whether `account` is authorized to move tokens. Admin-only.
+    pub fn set_authorized(e: Env, admin_addr: Address, account: Address, authorized: bool) {
+        admin::check_admin(&e, &admin_addr);
+        crate::authorization::set_authorized(&e, &account, authorized);
+    }
+
+    /// Whether `account` is authorized to move tokens.
+    pub fn is_authorized(e: Env, account: Address) -> bool {
+        crate::authorization::is_authorized(&e, &account)
     }
 
     /// True once an admin has been stored.
@@ -77,6 +99,21 @@ impl VeriTixPay {
     /// Whether whitelist enforcement is enabled.
     pub fn is_whitelist_enabled(e: Env) -> bool {
         whitelist::is_whitelist_enabled(&e)
+    }
+
+    /// Adds `account` to the whitelist. Admin-only.
+    pub fn add_to_whitelist(e: Env, admin_addr: Address, account: Address) {
+        whitelist::add_to_whitelist(&e, &admin_addr, &account);
+    }
+
+    /// Removes `account` from the whitelist. Admin-only.
+    pub fn remove_from_whitelist(e: Env, admin_addr: Address, account: Address) {
+        whitelist::remove_from_whitelist(&e, &admin_addr, &account);
+    }
+
+    /// Whether `account` is whitelisted.
+    pub fn is_whitelisted(e: Env, account: Address) -> bool {
+        whitelist::is_whitelisted(&e, &account)
     }
 
     /// The token name.
@@ -118,6 +155,7 @@ impl VeriTixPay {
     /// Moves `amount` of tokens from `from` to `to`.
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
+        crate::authorization::require_authorized(&e, &from);
         balance::transfer(&e, &from, &to, amount);
     }
 
@@ -136,7 +174,14 @@ impl VeriTixPay {
         amount: i128,
         deadline_ledger: u32,
     ) -> u32 {
-        escrow::create(&e, &depositor, &beneficiary, &token, amount, deadline_ledger)
+        escrow::create(
+            &e,
+            &depositor,
+            &beneficiary,
+            &token,
+            amount,
+            deadline_ledger,
+        )
     }
 
     /// Pays the beneficiary everything still held and closes the escrow.
@@ -162,33 +207,53 @@ impl VeriTixPay {
     }
 
     /// A page of escrow ids created by `depositor` (at most 50 per call).
-    pub fn get_escrows_by_depositor(e: Env, depositor: Address, start: u32, limit: u32) -> Vec<u32> {
+    pub fn get_escrows_by_depositor(
+        e: Env,
+        depositor: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<u32> {
         escrow::ids_page(&e, &DataKey::DepositorEscrows(depositor), start, limit)
     }
 
     /// A page of escrow ids owed to `beneficiary` (at most 50 per call).
-    pub fn get_escrows_by_beneficiary(e: Env, beneficiary: Address, start: u32, limit: u32) -> Vec<u32> {
+    pub fn get_escrows_by_beneficiary(
+        e: Env,
+        beneficiary: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<u32> {
         escrow::ids_page(&e, &DataKey::BeneficiaryEscrows(beneficiary), start, limit)
     }
 
-    /// Total token amount still held across all active escrows.
-    pub fn escrowed_total(e: Env) -> i128 {
-        escrow::escrowed_total(&e)
+    /// Total token amount still held across all active escrows for a given token.
+    pub fn escrowed_total(e: Env, token: Address) -> i128 {
+        escrow::escrowed_total(&e, &token)
     }
 
-    /// `(total locked, active count, settled count)` across all escrows.
-    pub fn escrow_stats(e: Env) -> (i128, u32, u32) {
-        escrow::stats(&e)
+    /// `(total locked, active count, settled count)` across all escrows for a given token.
+    pub fn escrow_stats(e: Env, token: Address) -> (i128, u32, u32) {
+        escrow::stats(&e, &token)
     }
 
     /// Reassigns an unsettled escrow to a new beneficiary. Depositor only.
-    pub fn transfer_escrow_beneficiary(e: Env, depositor: Address, escrow_id: u32, new_beneficiary: Address) {
+    pub fn transfer_escrow_beneficiary(
+        e: Env,
+        depositor: Address,
+        escrow_id: u32,
+        new_beneficiary: Address,
+    ) {
         escrow::transfer_beneficiary(&e, &depositor, escrow_id, &new_beneficiary);
     }
 
     /// Creates one escrow per recipient of split `split_id` for its share and
     /// returns the new escrow ids.
-    pub fn split_to_escrow(e: Env, sender: Address, split_id: u64, deadline_ledger: u32) -> Vec<u32> {
+    pub fn split_to_escrow(
+        e: Env,
+        sender: Address,
+        split_id: u64,
+        deadline_ledger: u32,
+    ) -> Vec<u32> {
         crate::splitter::split_to_escrow(&e, &sender, split_id, deadline_ledger)
     }
 
@@ -235,23 +300,33 @@ impl VeriTixPay {
     }
 
     /// Raises a dispute over `escrow_id`, freezing it until a ruling is final.
-    pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u64, resolver: Option<Address>) {
+    pub fn raise_dispute(e: Env, claimant: Address, escrow_id: u32, resolver: Option<Address>) {
         crate::dispute::raise_dispute(&e, &claimant, escrow_id, resolver);
     }
 
     /// Whether a dispute on `escrow_id` is still live and blocking settlement.
-    pub fn is_dispute_open(e: Env, escrow_id: u64) -> bool {
+    pub fn is_dispute_open(e: Env, escrow_id: u32) -> bool {
         crate::dispute::is_dispute_open(&e, escrow_id)
     }
 
     /// The dispute record for `escrow_id`.
-    pub fn get_dispute(e: Env, escrow_id: u64) -> crate::storage_types::DisputeRecord {
+    pub fn get_dispute(e: Env, escrow_id: u32) -> crate::storage_types::DisputeRecord {
         crate::dispute::get_dispute(&e, escrow_id)
     }
 
     /// The retained successful charge history for a recurring schedule.
     pub fn get_recurring_history(e: Env, recurring_id: u64) -> Vec<RecurringExecution> {
         recurring::get_recurring_history(&e, recurring_id)
+    }
+
+    /// Reads a recurring schedule by id.
+    pub fn get_recurring(e: Env, recurring_id: u64) -> RecurringPayment {
+        recurring::get_recurring(&e, recurring_id)
+    }
+
+    /// Whether the recurring schedule at `recurring_id` is active and not paused.
+    pub fn is_recurring_active(e: Env, recurring_id: u64) -> bool {
+        recurring::is_recurring_active(&e, recurring_id)
     }
 
     /// Creates a recurring schedule, authorising future charges from `payer`.
@@ -283,23 +358,28 @@ impl VeriTixPay {
 
     /// The arbiter picks a winner: records the ruling and opens the appeal
     /// window; a second call after the window lapses settles and pays.
-    pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+    pub fn resolve_dispute(e: Env, resolver: Address, escrow_id: u32, winner: Address) {
         crate::dispute::resolve_dispute(&e, resolver, escrow_id, winner);
     }
 
     /// The losing party escalates a ruling within the appeal window.
-    pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u64) {
+    pub fn appeal_dispute(e: Env, caller: Address, escrow_id: u32) {
         crate::dispute::appeal_dispute(&e, &caller, escrow_id);
     }
 
     /// The final, unappealable ruling: settles the escrow and pays the winner.
-    pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u64, winner: Address) {
+    pub fn resolve_appeal(e: Env, resolver: Address, escrow_id: u32, winner: Address) {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
-/// Executes one due charge from an authorised recurring payment.
+    /// Executes one due charge from an authorised recurring payment.
     pub fn execute_recurring(e: Env, recurring_id: u64) {
         recurring::execute_recurring(&e, recurring_id);
+    }
+
+    /// Cancels a recurring payment schedule.
+    pub fn cancel_recurring(e: Env, caller: Address, recurring_id: u64) {
+        recurring::cancel_recurring(&e, &caller, recurring_id);
     }
 
     /// Sets the global dispute arbiter (resolver) used to settle disputes.
@@ -342,7 +422,10 @@ impl VeriTixPay {
     /// # Panics
     ///
     /// Panics when no multi-escrow exists at `multi_escrow_id`.
-    pub fn get_multi_escrow(e: Env, multi_escrow_id: u64) -> crate::storage_types::MultiEscrowRecord {
+    pub fn get_multi_escrow(
+        e: Env,
+        multi_escrow_id: u64,
+    ) -> crate::storage_types::MultiEscrowRecord {
         crate::multi_escrow::record(&e, multi_escrow_id)
     }
 
@@ -405,8 +488,8 @@ impl VeriTixPay {
 mod tests {
     use super::*;
     use crate::storage_types::EscrowStatus;
-    use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::testutils::{Address as _, Events as _};
+    use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{vec, xdr, FromVal, IntoVal};
 
     struct Fixture {
@@ -469,10 +552,10 @@ mod tests {
             (address, token)
         }
 
-        /// The total the contract reports as still held in escrow.
-        fn locked(&self) -> i128 {
+        /// The total the contract reports as still held in escrow for `token`.
+        fn locked(&self, token: &Address) -> i128 {
             self.e
-                .as_contract(&self.contract_id, || escrow::value_locked(&self.e))
+                .as_contract(&self.contract_id, || escrow::value_locked(&self.e, token))
         }
 
         fn escrows_created(&self) -> u32 {
@@ -508,12 +591,12 @@ mod tests {
     #[test]
     fn create_escrow_holds_the_funds_for_the_beneficiary() {
         let f = Fixture::new();
-        let (depositor, beneficiary, _token_address, token, _id) = f.escrow(1_000);
+        let (depositor, beneficiary, token_address, token, _id) = f.escrow(1_000);
 
         assert_eq!(token.balance(&depositor), 0);
         assert_eq!(token.balance(&f.contract), 1_000);
         assert_eq!(token.balance(&beneficiary), 0);
-        assert_eq!(f.locked(), 1_000);
+        assert_eq!(f.locked(&token_address), 1_000);
     }
 
     #[test]
@@ -552,11 +635,11 @@ mod tests {
     #[test]
     fn release_decrements_the_locked_value() {
         let f = Fixture::new();
-        let (_depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+        let (_depositor, _beneficiary, token_address, _token, id) = f.escrow(1_000);
 
         f.client.release_escrow(&Address::generate(&f.e), &id);
 
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
@@ -595,7 +678,7 @@ mod tests {
     #[test]
     fn a_released_escrow_cannot_be_released_again() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
         f.client.release_escrow(&f.admin, &id);
 
         assert!(panics(|| {
@@ -603,7 +686,7 @@ mod tests {
         }));
         // The beneficiary is paid once, not twice.
         assert_eq!(token.balance(&beneficiary), 1_000);
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
@@ -641,14 +724,15 @@ mod tests {
     #[test]
     fn releasing_one_escrow_leaves_the_others_locked() {
         let f = Fixture::new();
-        let (_d1, _b1, _t1, _a1, first) = f.escrow(400);
-        let (_d2, _b2, _t2, _a2, second) = f.escrow(600);
+        let (_d1, _b1, t1, _a1, first) = f.escrow(400);
+        let (_d2, _b2, t2, _a2, second) = f.escrow(600);
 
         f.client.release_escrow(&f.admin, &first);
 
         assert!(f.client.is_escrow_settled(&first));
         assert!(!f.client.is_escrow_settled(&second));
-        assert_eq!(f.locked(), 600);
+        assert_eq!(f.locked(&t1), 0);
+        assert_eq!(f.locked(&t2), 600);
     }
 
     // ---- #884: refund_escrow --------------------------------------------
@@ -657,6 +741,7 @@ mod tests {
     fn refund_pays_the_depositor_everything_held() {
         let f = Fixture::new();
         let (depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         f.client.refund_escrow(&depositor, &id);
 
@@ -668,13 +753,14 @@ mod tests {
     #[test]
     fn refund_marks_the_escrow_refunded_and_settled() {
         let f = Fixture::new();
-        let (depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+        let (depositor, _beneficiary, token_address, _token, id) = f.escrow(1_000);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         f.client.refund_escrow(&depositor, &id);
 
         assert_eq!(f.client.get_escrow(&id).status, EscrowStatus::Refunded);
         assert!(f.client.is_escrow_settled(&id));
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
@@ -685,6 +771,26 @@ mod tests {
         f.client.refund_escrow(&f.admin, &id);
 
         assert_eq!(token.balance(&depositor), 1_000);
+    }
+
+    #[test]
+    fn the_beneficiary_can_refund_before_deadline() {
+        let f = Fixture::new();
+        let (depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+
+        f.client.refund_escrow(&beneficiary, &id);
+
+        assert_eq!(token.balance(&depositor), 1_000);
+    }
+
+    #[test]
+    fn depositor_cannot_refund_before_deadline() {
+        let f = Fixture::new();
+        let (depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+
+        assert!(panics(|| {
+            f.client.refund_escrow(&depositor, &id);
+        }));
     }
 
     #[test]
@@ -704,6 +810,7 @@ mod tests {
     fn a_refunded_escrow_cannot_be_released() {
         let f = Fixture::new();
         let (depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
         f.client.refund_escrow(&depositor, &id);
 
         assert!(panics(|| {
@@ -718,6 +825,7 @@ mod tests {
         let f = Fixture::new();
         let (depositor, _beneficiary, _token_address, token, id) = f.escrow(1_000);
         f.client.release_escrow(&f.admin, &id);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         assert!(panics(|| {
             f.client.refund_escrow(&depositor, &id);
@@ -729,6 +837,7 @@ mod tests {
     fn refund_emits_the_depositor_the_id_and_the_amount() {
         let f = Fixture::new();
         let (depositor, _beneficiary, _token_address, _token, id) = f.escrow(750);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         f.client.refund_escrow(&depositor, &id);
 
@@ -774,24 +883,24 @@ mod tests {
     #[test]
     fn a_partial_release_decrements_the_locked_value() {
         let f = Fixture::new();
-        let (_depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+        let (_depositor, _beneficiary, token_address, _token, id) = f.escrow(1_000);
 
         f.client.release_partial_escrow(&f.admin, &id, &300);
 
-        assert_eq!(f.locked(), 700);
+        assert_eq!(f.locked(&token_address), 700);
     }
 
     #[test]
     fn successive_partial_releases_add_up() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
 
         f.client.release_partial_escrow(&f.admin, &id, &300);
         f.client.release_partial_escrow(&f.admin, &id, &200);
 
         assert_eq!(token.balance(&beneficiary), 500);
         assert_eq!(f.client.get_escrow(&id).amount, 500);
-        assert_eq!(f.locked(), 500);
+        assert_eq!(f.locked(&token_address), 500);
     }
 
     #[test]
@@ -799,7 +908,7 @@ mod tests {
         // "Active until the remainder is zero" — the call that takes it to zero
         // is the one that closes the escrow.
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
 
         f.client.release_partial_escrow(&f.admin, &id, &300);
         f.client.release_partial_escrow(&f.admin, &id, &700);
@@ -809,13 +918,13 @@ mod tests {
         assert_eq!(record.amount, 0);
         assert_eq!(record.status, EscrowStatus::Released);
         assert!(f.client.is_escrow_settled(&id));
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
     fn a_partial_release_above_the_remainder_is_refused() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
         f.client.release_partial_escrow(&f.admin, &id, &300);
 
         assert!(panics(|| {
@@ -823,7 +932,7 @@ mod tests {
         }));
         assert_eq!(token.balance(&beneficiary), 300);
         assert_eq!(f.client.get_escrow(&id).amount, 700);
-        assert_eq!(f.locked(), 700);
+        assert_eq!(f.locked(&token_address), 700);
     }
 
     #[test]
@@ -841,14 +950,14 @@ mod tests {
     #[test]
     fn a_negative_partial_release_is_refused() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
 
         assert!(panics(|| {
             f.client.release_partial_escrow(&f.admin, &id, &-100);
         }));
         assert_eq!(token.balance(&beneficiary), 0);
         assert_eq!(f.client.get_escrow(&id).amount, 1_000);
-        assert_eq!(f.locked(), 1_000);
+        assert_eq!(f.locked(&token_address), 1_000);
     }
 
     #[test]
@@ -888,13 +997,13 @@ mod tests {
     #[test]
     fn a_full_release_after_a_partial_pays_the_remainder() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
         f.client.release_partial_escrow(&f.admin, &id, &250);
 
         f.client.release_escrow(&f.admin, &id);
 
         assert_eq!(token.balance(&beneficiary), 1_000);
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
         assert!(f.client.is_escrow_settled(&id));
     }
 
@@ -985,6 +1094,73 @@ mod tests {
         assert_eq!(f.client.get_escrow(&id).amount, 600);
         assert!(!f.client.is_escrow_settled(&id));
     }
+
+    #[test]
+    fn whitelist_batch_and_signed() {
+        let f = Fixture::new();
+        let u1 = Address::generate(&f.e);
+        let u2 = Address::generate(&f.e);
+        let u3 = Address::generate(&f.e);
+
+        assert!(!f.client.is_whitelisted(&u1));
+        assert!(!f.client.is_whitelisted(&u2));
+
+        f.client.add_to_whitelist_batch(&f.admin, &vec![&f.e, u1.clone(), u2.clone()]);
+        assert!(f.client.is_whitelisted(&u1));
+        assert!(f.client.is_whitelisted(&u2));
+
+        let nonce = f.client.get_whitelist_nonce(&f.admin);
+        assert_eq!(nonce, 0);
+
+        f.client.add_to_whitelist_signed(&f.admin, &vec![&f.e, u3.clone()], &0);
+        assert!(f.client.is_whitelisted(&u3));
+        assert_eq!(f.client.get_whitelist_nonce(&f.admin), 1);
+
+        // Reusing nonce 0 panics
+        assert!(panics(|| {
+            f.client.add_to_whitelist_signed(&f.admin, &vec![&f.e, u3.clone()], &0);
+        }));
+    }
+
+    #[test]
+    fn dispute_stats_and_claimant_tracking() {
+        let f = Fixture::new();
+        let (d, _b, _t, _tok, id) = f.escrow(1_000);
+        let stats_before = f.client.dispute_stats();
+        assert_eq!(stats_before, (0, 0, 0));
+
+        f.client.raise_dispute(&d, &(id as u64), &None);
+        let stats_after = f.client.dispute_stats();
+        assert_eq!(stats_after, (1, 0, 0));
+
+        let claimant_disputes = f.client.get_disputes_by_claimant(&d);
+        assert_eq!(claimant_disputes.len(), 1);
+        assert_eq!(claimant_disputes.get(0).unwrap().escrow_id, id as u64);
+    }
+
+    #[test]
+    fn emergency_withdraw_leaves_escrowed_funds() {
+        let f = Fixture::new();
+        let depositor = Address::generate(&f.e);
+        let recipient = Address::generate(&f.e);
+        let (token_address, token) = f.asset(&depositor, 1_000);
+
+        // Lock 600 in escrow
+        let b = Address::generate(&f.e);
+        f.client.create_escrow(&depositor, &b, &token_address, &600, &2_000);
+
+        // Stranded funds: mint 400 extra directly to contract
+        token.mint(&f.contract, &400);
+
+        // Trying to withdraw more than unescrowed (400) panics
+        assert!(panics(|| {
+            f.client.emergency_withdraw(&f.admin, &recipient, &token_address, &500);
+        }));
+
+        // Withdrawing unescrowed 400 succeeds
+        f.client.emergency_withdraw(&f.admin, &recipient, &token_address, &400);
+        assert_eq!(token.balance(&recipient), 400);
+    }
 }
 
 #[cfg(test)]
@@ -1009,7 +1185,12 @@ pub mod testing {
             let client = VeriTixPayClient::new(&e, &contract_id);
             let admin = Address::generate(&e);
             client.initialize(&admin);
-            Fixture { e, client, contract_id, admin }
+            Fixture {
+                e,
+                client,
+                contract_id,
+                admin,
+            }
         }
 
         /// A new account holding `amount` tokens.

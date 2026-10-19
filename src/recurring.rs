@@ -1,6 +1,6 @@
 //! Execution of authorised recurring charges and retained execution history.
 
-use soroban_sdk::{Env, Vec};
+use soroban_sdk::{token, Address, Env, Vec};
 
 use crate::balance;
 use crate::storage_types::{DataKey, RecurringExecution, RecurringPayment};
@@ -8,6 +8,9 @@ use crate::validation::require_positive_amount;
 
 /// Maximum number of successful charges retained for each schedule.
 pub const MAX_RECURRING_HISTORY: u32 = 100;
+
+/// Maximum number of recurring schedules indexed per address (payer or payee).
+pub const MAX_RECURRING_PER_ADDRESS: u32 = 100;
 
 /// Creates a recurring schedule and indexes it for both participants.
 pub fn create(
@@ -59,18 +62,38 @@ pub fn create(
         .set(&DataKey::RecurringCount, &next_id);
 
     let mut payer_ids = recurring_ids_for_payer(e, payer);
+    if payer_ids.len() >= MAX_RECURRING_PER_ADDRESS {
+        panic!("RecurringIndexFull: payer has reached the recurring schedule limit");
+    }
     payer_ids.push_back(id);
     e.storage()
         .persistent()
         .set(&DataKey::PayerRecurrings(payer.clone()), &payer_ids);
 
     let mut payee_ids = recurring_ids_for_payee(e, payee);
+    if payee_ids.len() >= MAX_RECURRING_PER_ADDRESS {
+        panic!("RecurringIndexFull: payee has reached the recurring schedule limit");
+    }
     payee_ids.push_back(id);
     e.storage()
         .persistent()
         .set(&DataKey::PayeeRecurrings(payee.clone()), &payee_ids);
 
     id
+}
+
+/// Reads a recurring schedule by id.
+pub fn get_recurring(e: &Env, recurring_id: u64) -> RecurringPayment {
+    e.storage()
+        .persistent()
+        .get::<_, RecurringPayment>(&DataKey::Recurring(recurring_id))
+        .unwrap_or_else(|| panic!("RecurringNotFound: payment {} does not exist", recurring_id))
+}
+
+/// Whether the recurring schedule at `recurring_id` is active and not paused.
+pub fn is_recurring_active(e: &Env, recurring_id: u64) -> bool {
+    let schedule = get_recurring(e, recurring_id);
+    schedule.active && !schedule.paused
 }
 
 /// Returns all schedules created by `payer`.
@@ -141,14 +164,73 @@ pub fn execute_recurring(e: &Env, recurring_id: u64) {
         panic!("RecurringIntervalInvalid: interval must be positive");
     }
 
-    let next_execution = schedule
-        .next_execution
+    let current_ledger = e.ledger().sequence();
+    let next_execution = current_ledger
         .checked_add(schedule.interval_ledgers)
         .unwrap_or_else(|| panic!("RecurringLedgerOverflow: next execution ledger overflows"));
     require_positive_amount(schedule.amount);
-    balance::transfer(e, &schedule.payer, &schedule.payee, schedule.amount);
+    if schedule.token == e.current_contract_address() {
+        balance::transfer(e, &schedule.payer, &schedule.payee, schedule.amount);
+    } else {
+        token::TokenClient::new(e, &schedule.token).transfer_from(
+            &e.current_contract_address(),
+            &schedule.payer,
+            &schedule.payee,
+            &schedule.amount,
+        );
+    }
 
     schedule.next_execution = next_execution;
+    e.storage().persistent().set(&key, &schedule);
+    record_execution(e, recurring_id, schedule.amount);
+}
+
+/// Pauses an active recurring schedule. Must be called by payer or payee.
+pub fn pause_recurring(e: &Env, caller: &Address, recurring_id: u64) {
+    caller.require_auth();
+    let key = DataKey::Recurring(recurring_id);
+    let mut schedule = e
+        .storage()
+        .persistent()
+        .get::<_, RecurringPayment>(&key)
+        .unwrap_or_else(|| panic!("RecurringNotFound: payment {} does not exist", recurring_id));
+
+    if caller != &schedule.payer && caller != &schedule.payee {
+        panic!("Unauthorized: caller is neither payer nor payee");
+    }
+    if !schedule.active {
+        panic!("RecurringInactive: payment {} is inactive", recurring_id);
+    }
+    schedule.paused = true;
+    e.storage().persistent().set(&key, &schedule);
+}
+
+/// Resumes a paused recurring schedule. Must be called by payer or payee.
+///
+/// If `next_execution` is in the past or current ledger, advances it by one
+/// interval from the current ledger so resumption does not trigger a back-charge burst.
+pub fn resume_recurring(e: &Env, caller: &Address, recurring_id: u64) {
+    caller.require_auth();
+    let key = DataKey::Recurring(recurring_id);
+    let mut schedule = e
+        .storage()
+        .persistent()
+        .get::<_, RecurringPayment>(&key)
+        .unwrap_or_else(|| panic!("RecurringNotFound: payment {} does not exist", recurring_id));
+
+    if caller != &schedule.payer && caller != &schedule.payee {
+        panic!("Unauthorized: caller is neither payer nor payee");
+    }
+    if !schedule.active {
+        panic!("RecurringInactive: payment {} is inactive", recurring_id);
+    }
+    schedule.paused = false;
+    let current_ledger = e.ledger().sequence();
+    if schedule.next_execution <= current_ledger {
+        schedule.next_execution = current_ledger
+            .checked_add(schedule.interval_ledgers)
+            .unwrap_or_else(|| panic!("RecurringLedgerOverflow: next execution ledger overflows"));
+    }
     e.storage().persistent().set(&key, &schedule);
 }
 
@@ -183,6 +265,58 @@ pub fn get_recurring_history(e: &Env, recurring_id: u64) -> Vec<RecurringExecuti
         .unwrap_or_else(|| Vec::new(e))
 }
 
+/// Cancels an active recurring schedule. Must be called by payer or payee.
+///
+/// Sets `active = false`, removes the schedule from both payer and payee indexes,
+/// and emits a `RecurringCancelled` event.
+pub fn cancel_recurring(e: &Env, caller: &soroban_sdk::Address, recurring_id: u64) {
+    caller.require_auth();
+    let key = DataKey::Recurring(recurring_id);
+    let mut schedule = e
+        .storage()
+        .persistent()
+        .get::<_, RecurringPayment>(&key)
+        .unwrap_or_else(|| panic!("RecurringNotFound: payment {} does not exist", recurring_id));
+
+    if caller != &schedule.payer && caller != &schedule.payee {
+        panic!("Unauthorized: caller is neither payer nor payee");
+    }
+    if !schedule.active {
+        panic!("RecurringInactive: payment {} is inactive", recurring_id);
+    }
+
+    schedule.active = false;
+    e.storage().persistent().set(&key, &schedule);
+
+    let payer_key = DataKey::PayerRecurrings(schedule.payer.clone());
+    if let Some(payer_ids) = e.storage().persistent().get::<_, Vec<u64>>(&payer_key) {
+        let mut new_ids = Vec::new(e);
+        for id in payer_ids.iter() {
+            if id != recurring_id {
+                new_ids.push_back(id);
+            }
+        }
+        e.storage().persistent().set(&payer_key, &new_ids);
+    }
+
+    let payee_key = DataKey::PayeeRecurrings(schedule.payee.clone());
+    if let Some(payee_ids) = e.storage().persistent().get::<_, Vec<u64>>(&payee_key) {
+        let mut new_ids = Vec::new(e);
+        for id in payee_ids.iter() {
+            if id != recurring_id {
+                new_ids.push_back(id);
+            }
+        }
+        e.storage().persistent().set(&payee_key, &new_ids);
+    }
+
+    crate::events::RecurringCancelled {
+        caller: caller.clone(),
+        recurring_id,
+    }
+    .publish(e);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,7 +345,7 @@ mod tests {
                 &RecurringPayment {
                     payer: payer.clone(),
                     payee: payee.clone(),
-                    token: Address::generate(&e),
+                    token: contract_id.clone(),
                     amount: 25,
                     interval_ledgers: 10,
                     next_execution,
@@ -239,6 +373,38 @@ mod tests {
             assert_eq!(schedule.next_execution, 110);
             assert_eq!(balance_of(&e, &payer), 75);
             assert_eq!(balance_of(&e, &payee), 25);
+            let history = get_recurring_history(&e, 1);
+            assert_eq!(history.len(), 1);
+            assert_eq!(history.get(0).unwrap().amount, 25);
+            assert_eq!(history.get(0).unwrap().ledger, 100);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "RecurringNotDue")]
+    fn late_schedule_advances_from_current_ledger_and_burst_is_rejected() {
+        // Due at 50, but executed late at ledger 100
+        let (e, contract_id, _, _) = setup(50, true, false, 100);
+        e.as_contract(&contract_id, || {
+            execute_recurring(&e, 1);
+            // After execution at ledger 100, next execution is 110. Second immediate execution must fail.
+            execute_recurring(&e, 1);
+        });
+    }
+
+    #[test]
+    fn pause_and_resume_recurring_lifecycle() {
+        let (e, contract_id, payer, payee) = setup(50, true, false, 100);
+        e.as_contract(&contract_id, || {
+            pause_recurring(&e, &payer, 1);
+            let s: RecurringPayment = e.storage().persistent().get(&DataKey::Recurring(1)).unwrap();
+            assert!(s.paused);
+
+            resume_recurring(&e, &payee, 1);
+            let s: RecurringPayment = e.storage().persistent().get(&DataKey::Recurring(1)).unwrap();
+            assert!(!s.paused);
+            // next_execution was 50 (in the past); resumed at ledger 100, so next_execution is 100 + 10 = 110
+            assert_eq!(s.next_execution, 110);
         });
     }
 

@@ -112,13 +112,7 @@ fn store(e: &Env, owner: &Address, spender: &Address, amount: i128, expiration_l
 /// Panics with `ExpirationInPast` when `amount` is positive and
 /// `expiration_ledger` is already behind the current ledger. A zero amount is
 /// always accepted, because revoking an allowance has no expiry to get wrong.
-pub fn approve(
-    e: &Env,
-    owner: &Address,
-    spender: &Address,
-    amount: i128,
-    expiration_ledger: u32,
-) {
+pub fn approve(e: &Env, owner: &Address, spender: &Address, amount: i128, expiration_ledger: u32) {
     require_non_negative(amount);
     if amount > 0 && expiration_ledger < e.ledger().sequence() {
         panic!(

@@ -123,7 +123,7 @@ mod tests {
             token: Address::generate(&e),
             total_amount: 1_000,
             recipients: vec![&e, old.clone(), other],
-            shares_bps: vec![&e, 6_000, 2_500, 1_500],
+            shares_bps: vec![&e, 6_000, 4_000],
             distributed: false,
         };
         e.storage()

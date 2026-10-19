@@ -7,6 +7,7 @@
 
 use crate::events::{MultiEscrowCreated, MultiEscrowRefunded, MultiEscrowReleased};
 use crate::storage_types::{DataKey, MultiEscrowRecord, MultiEscrowStatus};
+use crate::validation::require_positive_amount;
 use soroban_sdk::{token, Address, Env, Vec};
 
 /// Number of multi-escrows created so far, which is also the next id.
@@ -43,11 +44,7 @@ pub fn is_settled(e: &Env, id: u64) -> bool {
 
 /// Sends `amount` of `token` out of the contract to `to`.
 fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
-    token::TokenClient::new(e, token_address).transfer(
-        &e.current_contract_address(),
-        to,
-        &amount,
-    );
+    token::TokenClient::new(e, token_address).transfer(&e.current_contract_address(), to, &amount);
 }
 
 /// Holds `total` of `token` split across `beneficiaries` and returns the new
@@ -84,9 +81,18 @@ pub fn create(
     if beneficiaries.is_empty() {
         panic!("MultiEscrowEmpty: at least one beneficiary is required");
     }
+    if beneficiaries.len() > MAX_MULTI_ESCROW_BENEFICIARIES {
+        panic!(
+            "MultiEscrowTooManyBeneficiaries: {} exceeds maximum allowed {}",
+            beneficiaries.len(),
+            MAX_MULTI_ESCROW_BENEFICIARIES
+        );
+    }
 
+    require_positive_amount(total);
     let mut sum: i128 = 0;
     for amount in amounts.iter() {
+        require_positive_amount(amount);
         sum = sum
             .checked_add(amount)
             .unwrap_or_else(|| panic!("MultiEscrowOverflow: amounts overflow i128"));
@@ -101,7 +107,8 @@ pub fn create(
     // Move the funds before recording the escrow. A token transfer that fails
     // panics and reverts the whole invocation, so there is no window in which
     // a record exists for funds that never arrived.
-    pay(e, token_address, depositor, -total);
+    let contract_address = e.current_contract_address();
+    token::TokenClient::new(e, token_address).transfer(depositor, &contract_address, &total);
 
     let id = count(e);
     let record = MultiEscrowRecord {
@@ -162,9 +169,6 @@ pub fn release(e: &Env, caller: &Address, id: u64) {
         pay(e, &record.token, &beneficiary, amount);
     }
 
-    // Drain the record to zero: every leg was paid, so nothing is still owed.
-    let drained = Vec::new(e);
-    record.amounts = drained;
     record.status = MultiEscrowStatus::Released;
     e.storage()
         .persistent()

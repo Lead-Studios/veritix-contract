@@ -47,6 +47,8 @@ pub mod dispute;
 pub mod dividend;
 pub mod escrow;
 pub mod events;
+pub mod fee;
+pub mod info;
 pub mod metadata;
 pub mod multi_escrow;
 pub mod recurring;
@@ -54,6 +56,8 @@ pub mod splitter;
 pub mod storage_types;
 pub mod validation;
 pub mod whitelist;
+pub mod whitelist_batch;
+pub mod whitelist_signed;
 
 #[cfg(test)]
 mod admin_test;
