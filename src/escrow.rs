@@ -10,7 +10,10 @@ use soroban_sdk::{token, Address, Env};
 /// never be confused with a live one that happens to sit at the same storage
 /// offset.
 pub fn count(e: &Env) -> u32 {
-    e.storage().persistent().get(&DataKey::EscrowCount).unwrap_or(0)
+    e.storage()
+        .persistent()
+        .get(&DataKey::EscrowCount)
+        .unwrap_or(0)
 }
 
 /// Total token amount still held across all active escrows.
@@ -24,7 +27,9 @@ pub fn value_locked(e: &Env) -> i128 {
 /// Stores an escrow record under the next id and advances the counter past it.
 fn store_new(e: &Env, record: &EscrowRecord) -> u32 {
     let id = count(e);
-    e.storage().persistent().set(&DataKey::EscrowRecord(id), record);
+    e.storage()
+        .persistent()
+        .set(&DataKey::EscrowRecord(id), record);
     let next_id = id
         .checked_add(1)
         .unwrap_or_else(|| panic!("EscrowIdOverflow: escrow id would overflow u32"));
@@ -32,7 +37,11 @@ fn store_new(e: &Env, record: &EscrowRecord) -> u32 {
         .persistent()
         .set(&DataKey::EscrowCount, &next_id);
     index_push(e, DataKey::DepositorEscrows(record.depositor.clone()), id);
-    index_push(e, DataKey::BeneficiaryEscrows(record.beneficiary.clone()), id);
+    index_push(
+        e,
+        DataKey::BeneficiaryEscrows(record.beneficiary.clone()),
+        id,
+    );
     id
 }
 
@@ -103,7 +112,9 @@ pub fn stats(e: &Env) -> (i128, u32, u32) {
 
 /// Overwrites the record stored at `id`.
 fn store_record(e: &Env, id: u32, record: &EscrowRecord) {
-    e.storage().persistent().set(&DataKey::EscrowRecord(id), record);
+    e.storage()
+        .persistent()
+        .set(&DataKey::EscrowRecord(id), record);
 }
 
 /// Adds `amount` to the total held in active escrows.
@@ -160,7 +171,9 @@ pub const MAX_BATCH: u32 = 50;
 ///
 /// Panics with `EscrowNotFound` when no escrow exists at `id`.
 pub fn age(e: &Env, id: u32) -> u32 {
-    e.ledger().sequence().saturating_sub(record(e, id).created_ledger)
+    e.ledger()
+        .sequence()
+        .saturating_sub(record(e, id).created_ledger)
 }
 
 /// Reads many escrows at once, preserving order and returning `None` for ids
@@ -210,10 +223,7 @@ pub fn is_settled(e: &Env, id: u32) -> bool {
 /// release nor refund may move funds until a ruling is final.
 fn require_no_open_dispute(e: &Env, id: u32) {
     if crate::dispute::is_dispute_open(e, id as u64) {
-        panic!(
-            "EscrowDisputed: escrow {} is frozen by an open dispute",
-            id
-        );
+        panic!("EscrowDisputed: escrow {} is frozen by an open dispute", id);
     }
 }
 
@@ -248,11 +258,7 @@ fn require_settlement_authority(e: &Env, caller: &Address, record: &EscrowRecord
 
 /// Sends `amount` of `token` out of the contract to `to`.
 fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
-    token::TokenClient::new(e, token_address).transfer(
-        &e.current_contract_address(),
-        to,
-        &amount,
-    );
+    token::TokenClient::new(e, token_address).transfer(&e.current_contract_address(), to, &amount);
 }
 
 /// Holds `amount` of `token` for `beneficiary` and returns the new escrow's id.
@@ -287,7 +293,8 @@ pub fn create(
     // Move the funds before recording the escrow. A token transfer that fails
     // panics and reverts the whole invocation, so there is no window in which
     // an escrow exists for funds that never arrived.
-    pay(e, token_address, depositor, -amount);
+    let contract_address = e.current_contract_address();
+    token::TokenClient::new(e, token_address).transfer(depositor, &contract_address, &amount);
     let id = store_new(
         e,
         &EscrowRecord {
@@ -324,7 +331,15 @@ pub fn release(e: &Env, caller: &Address, id: u32) {
     require_settlement_authority(e, caller, &record);
 
     let amount = record.amount;
-    pay(e, &record.token, &record.beneficiary, amount);
+    let fee = crate::fee::calculate_fee(e, amount);
+    let payout = amount.checked_sub(fee).unwrap_or(amount);
+
+    if fee > 0 {
+        if let Some(treasury) = crate::fee::get_treasury(e) {
+            pay(e, &record.token, &treasury, fee);
+        }
+    }
+    pay(e, &record.token, &record.beneficiary, payout);
     decrease_value_locked(e, amount);
     record.status = EscrowStatus::Released;
     record.amount = 0;
@@ -426,7 +441,10 @@ pub fn admin_settle(e: &Env, admin: &Address, id: u32, winner: &Address) {
     crate::admin::check_admin(e, admin);
     let mut record = record(e, id);
     if is_settled_status(&record.status) {
-        panic!("EscrowNotActive: escrow {} is already {:?}", id, record.status);
+        panic!(
+            "EscrowNotActive: escrow {} is already {:?}",
+            id, record.status
+        );
     }
     if winner != &record.depositor && winner != &record.beneficiary {
         panic!("WinnerNotEscrowParty: winner must be the depositor or the beneficiary");
@@ -509,11 +527,18 @@ pub fn transfer_beneficiary(e: &Env, depositor: &Address, id: u32, new_beneficia
     let mut record = record(e, id);
     require_active(id, &record);
     if &record.depositor != depositor {
-        panic!("Unauthorized: only the depositor may change the beneficiary of escrow {}", id);
+        panic!(
+            "Unauthorized: only the depositor may change the beneficiary of escrow {}",
+            id
+        );
     }
     depositor.require_auth();
 
-    index_remove(e, DataKey::BeneficiaryEscrows(record.beneficiary.clone()), id);
+    index_remove(
+        e,
+        DataKey::BeneficiaryEscrows(record.beneficiary.clone()),
+        id,
+    );
     index_push(e, DataKey::BeneficiaryEscrows(new_beneficiary.clone()), id);
     record.beneficiary = new_beneficiary.clone();
     store_record(e, id, &record);

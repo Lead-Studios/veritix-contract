@@ -43,11 +43,7 @@ pub fn is_settled(e: &Env, id: u64) -> bool {
 
 /// Sends `amount` of `token` out of the contract to `to`.
 fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
-    token::TokenClient::new(e, token_address).transfer(
-        &e.current_contract_address(),
-        to,
-        &amount,
-    );
+    token::TokenClient::new(e, token_address).transfer(&e.current_contract_address(), to, &amount);
 }
 
 /// Holds `total` of `token` split across `beneficiaries` and returns the new
@@ -101,7 +97,8 @@ pub fn create(
     // Move the funds before recording the escrow. A token transfer that fails
     // panics and reverts the whole invocation, so there is no window in which
     // a record exists for funds that never arrived.
-    pay(e, token_address, depositor, -total);
+    let contract_address = e.current_contract_address();
+    token::TokenClient::new(e, token_address).transfer(depositor, &contract_address, &total);
 
     let id = count(e);
     let record = MultiEscrowRecord {

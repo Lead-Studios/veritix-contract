@@ -136,7 +136,14 @@ impl VeriTixPay {
         amount: i128,
         deadline_ledger: u32,
     ) -> u32 {
-        escrow::create(&e, &depositor, &beneficiary, &token, amount, deadline_ledger)
+        escrow::create(
+            &e,
+            &depositor,
+            &beneficiary,
+            &token,
+            amount,
+            deadline_ledger,
+        )
     }
 
     /// Pays the beneficiary everything still held and closes the escrow.
@@ -162,12 +169,22 @@ impl VeriTixPay {
     }
 
     /// A page of escrow ids created by `depositor` (at most 50 per call).
-    pub fn get_escrows_by_depositor(e: Env, depositor: Address, start: u32, limit: u32) -> Vec<u32> {
+    pub fn get_escrows_by_depositor(
+        e: Env,
+        depositor: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<u32> {
         escrow::ids_page(&e, &DataKey::DepositorEscrows(depositor), start, limit)
     }
 
     /// A page of escrow ids owed to `beneficiary` (at most 50 per call).
-    pub fn get_escrows_by_beneficiary(e: Env, beneficiary: Address, start: u32, limit: u32) -> Vec<u32> {
+    pub fn get_escrows_by_beneficiary(
+        e: Env,
+        beneficiary: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<u32> {
         escrow::ids_page(&e, &DataKey::BeneficiaryEscrows(beneficiary), start, limit)
     }
 
@@ -182,13 +199,23 @@ impl VeriTixPay {
     }
 
     /// Reassigns an unsettled escrow to a new beneficiary. Depositor only.
-    pub fn transfer_escrow_beneficiary(e: Env, depositor: Address, escrow_id: u32, new_beneficiary: Address) {
+    pub fn transfer_escrow_beneficiary(
+        e: Env,
+        depositor: Address,
+        escrow_id: u32,
+        new_beneficiary: Address,
+    ) {
         escrow::transfer_beneficiary(&e, &depositor, escrow_id, &new_beneficiary);
     }
 
     /// Creates one escrow per recipient of split `split_id` for its share and
     /// returns the new escrow ids.
-    pub fn split_to_escrow(e: Env, sender: Address, split_id: u64, deadline_ledger: u32) -> Vec<u32> {
+    pub fn split_to_escrow(
+        e: Env,
+        sender: Address,
+        split_id: u64,
+        deadline_ledger: u32,
+    ) -> Vec<u32> {
         crate::splitter::split_to_escrow(&e, &sender, split_id, deadline_ledger)
     }
 
@@ -297,7 +324,7 @@ impl VeriTixPay {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
-/// Executes one due charge from an authorised recurring payment.
+    /// Executes one due charge from an authorised recurring payment.
     pub fn execute_recurring(e: Env, recurring_id: u64) {
         recurring::execute_recurring(&e, recurring_id);
     }
@@ -342,7 +369,10 @@ impl VeriTixPay {
     /// # Panics
     ///
     /// Panics when no multi-escrow exists at `multi_escrow_id`.
-    pub fn get_multi_escrow(e: Env, multi_escrow_id: u64) -> crate::storage_types::MultiEscrowRecord {
+    pub fn get_multi_escrow(
+        e: Env,
+        multi_escrow_id: u64,
+    ) -> crate::storage_types::MultiEscrowRecord {
         crate::multi_escrow::record(&e, multi_escrow_id)
     }
 
@@ -373,14 +403,39 @@ impl VeriTixPay {
     pub fn refund_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
         crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
     }
+
+    /// Returns the contract version string.
+    pub fn version(e: Env) -> String {
+        crate::info::version(&e)
+    }
+
+    /// Returns contract info including version, admin, paused flag, and initialized state.
+    pub fn get_contract_info(e: Env) -> crate::info::ContractInfo {
+        crate::info::get_contract_info(&e)
+    }
+
+    /// Sets the protocol fee in basis points and treasury address. Admin-only.
+    pub fn set_protocol_fee(e: Env, admin: Address, fee_bps: u32, treasury: Address) {
+        crate::fee::set_protocol_fee(&e, &admin, fee_bps, &treasury);
+    }
+
+    /// The configured protocol fee in basis points.
+    pub fn get_protocol_fee(e: Env) -> u32 {
+        crate::fee::get_fee_bps(&e)
+    }
+
+    /// The configured protocol fee treasury address.
+    pub fn get_fee_treasury(e: Env) -> Option<Address> {
+        crate::fee::get_treasury(&e)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage_types::EscrowStatus;
-    use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::testutils::{Address as _, Events as _};
+    use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{vec, xdr, FromVal, IntoVal};
 
     struct Fixture {
@@ -959,6 +1014,97 @@ mod tests {
         assert_eq!(f.client.get_escrow(&id).amount, 600);
         assert!(!f.client.is_escrow_settled(&id));
     }
+
+    #[test]
+    fn escrow_create_draws_funds_into_contract() {
+        let f = Fixture::new();
+        let depositor = Address::generate(&f.e);
+        let beneficiary = Address::generate(&f.e);
+        let (token_address, token) = f.asset(&depositor, 1_000);
+
+        assert_eq!(token.balance(&depositor), 1_000);
+        assert_eq!(token.balance(&f.contract), 0);
+
+        let id = f
+            .client
+            .create_escrow(&depositor, &beneficiary, &token_address, &600, &2_000);
+        assert_eq!(id, 0);
+
+        assert_eq!(token.balance(&depositor), 400);
+        assert_eq!(token.balance(&f.contract), 600);
+    }
+
+    #[test]
+    fn multi_escrow_create_draws_funds_into_contract() {
+        let f = Fixture::new();
+        let depositor = Address::generate(&f.e);
+        let b1 = Address::generate(&f.e);
+        let b2 = Address::generate(&f.e);
+        let (token_address, token) = f.asset(&depositor, 2_000);
+
+        assert_eq!(token.balance(&depositor), 2_000);
+        assert_eq!(token.balance(&f.contract), 0);
+
+        let id = f.client.create_multi_escrow(
+            &depositor,
+            &token_address,
+            &vec![&f.e, b1, b2],
+            &vec![&f.e, 300, 500],
+            &800,
+        );
+        assert_eq!(id, 0);
+
+        assert_eq!(token.balance(&depositor), 1_200);
+        assert_eq!(token.balance(&f.contract), 800);
+    }
+
+    #[test]
+    fn contract_info_and_version() {
+        let f = Fixture::new();
+        let ver = f.client.version();
+        assert_eq!(ver, String::from_str(&f.e, env!("CARGO_PKG_VERSION")));
+
+        let info = f.client.get_contract_info();
+        assert_eq!(info.version, ver);
+        assert_eq!(info.admin, Some(f.admin.clone()));
+        assert!(!info.paused);
+        assert!(info.initialized);
+    }
+
+    #[test]
+    fn protocol_fee_configuration_and_deduction_on_release() {
+        let f = Fixture::new();
+        let treasury = Address::generate(&f.e);
+        // 200 bps = 2%
+        f.client.set_protocol_fee(&f.admin, &200, &treasury);
+        assert_eq!(f.client.get_protocol_fee(), 200);
+        assert_eq!(f.client.get_fee_treasury(), Some(treasury.clone()));
+
+        // Create escrow of 10_000
+        let depositor = Address::generate(&f.e);
+        let beneficiary = Address::generate(&f.e);
+        let (token_address, token) = f.asset(&depositor, 10_000);
+        let id = f
+            .client
+            .create_escrow(&depositor, &beneficiary, &token_address, &10_000, &2_000);
+
+        // Release: 2% fee (200) to treasury, remainder (9_800) to beneficiary
+        f.client.release_escrow(&f.admin, &id);
+
+        assert_eq!(token.balance(&treasury), 200);
+        assert_eq!(token.balance(&beneficiary), 9_800);
+        assert_eq!(token.balance(&f.contract), 0);
+    }
+
+    #[test]
+    fn protocol_fee_cap_rejection() {
+        let f = Fixture::new();
+        let treasury = Address::generate(&f.e);
+        // Over 10% (1_000 bps) must panic
+        assert!(panics(|| {
+            f.client.set_protocol_fee(&f.admin, &1_001, &treasury);
+        }));
+    }
 }
 
 #[cfg(test)]
@@ -983,7 +1129,12 @@ pub mod testing {
             let client = VeriTixPayClient::new(&e, &contract_id);
             let admin = Address::generate(&e);
             client.initialize(&admin);
-            Fixture { e, client, contract_id, admin }
+            Fixture {
+                e,
+                client,
+                contract_id,
+                admin,
+            }
         }
 
         /// A new account holding `amount` tokens.
