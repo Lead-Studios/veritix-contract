@@ -44,6 +44,8 @@ pub mod control;
 pub mod dispute;
 pub mod escrow;
 pub mod events;
+pub mod fee;
+pub mod info;
 pub mod metadata;
 pub mod multi_escrow;
 pub mod recurring;

@@ -291,16 +291,6 @@ fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
     token::TokenClient::new(e, token_address).transfer(&e.current_contract_address(), to, &amount);
 }
 
-/// Pulls `amount` of `token` from `from` into the contract.
-pub fn collect(e: &Env, token_address: &Address, from: &Address, amount: i128) {
-    let contract = e.current_contract_address();
-    token::TokenClient::new(e, token_address).transfer(
-        from,
-        &contract,
-        &amount,
-    );
-}
-
 /// Holds `amount` of `token` for `beneficiary` and returns the new escrow's id.
 ///
 /// Funds leave the depositor's account immediately and only reach the
@@ -341,7 +331,8 @@ pub fn create(
     // Move the funds before recording the escrow. A token transfer that fails
     // panics and reverts the whole invocation, so there is no window in which
     // an escrow exists for funds that never arrived.
-    pay(e, token_address, depositor, -amount);
+    let contract_address = e.current_contract_address();
+    token::TokenClient::new(e, token_address).transfer(depositor, &contract_address, &amount);
     let id = store_new(
         e,
         &EscrowRecord {
@@ -378,8 +369,16 @@ pub fn release(e: &Env, caller: &Address, id: u32) {
     require_settlement_authority(e, caller, &record);
 
     let amount = record.amount;
-    pay(e, &record.token, &record.beneficiary, amount);
-    decrease_value_locked(e, &record.token, amount);
+    let fee = crate::fee::calculate_fee(e, amount);
+    let payout = amount.checked_sub(fee).unwrap_or(amount);
+
+    if fee > 0 {
+        if let Some(treasury) = crate::fee::get_treasury(e) {
+            pay(e, &record.token, &treasury, fee);
+        }
+    }
+    pay(e, &record.token, &record.beneficiary, payout);
+    decrease_value_locked(e, amount);
     record.status = EscrowStatus::Released;
     record.amount = 0;
     store_record(e, id, &record);

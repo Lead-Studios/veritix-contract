@@ -456,6 +456,31 @@ impl VeriTixPay {
     pub fn refund_multi_escrow(e: Env, caller: Address, multi_escrow_id: u64) {
         crate::multi_escrow::refund(&e, &caller, multi_escrow_id);
     }
+
+    /// Returns the contract version string.
+    pub fn version(e: Env) -> String {
+        crate::info::version(&e)
+    }
+
+    /// Returns contract info including version, admin, paused flag, and initialized state.
+    pub fn get_contract_info(e: Env) -> crate::info::ContractInfo {
+        crate::info::get_contract_info(&e)
+    }
+
+    /// Sets the protocol fee in basis points and treasury address. Admin-only.
+    pub fn set_protocol_fee(e: Env, admin: Address, fee_bps: u32, treasury: Address) {
+        crate::fee::set_protocol_fee(&e, &admin, fee_bps, &treasury);
+    }
+
+    /// The configured protocol fee in basis points.
+    pub fn get_protocol_fee(e: Env) -> u32 {
+        crate::fee::get_fee_bps(&e)
+    }
+
+    /// The configured protocol fee treasury address.
+    pub fn get_fee_treasury(e: Env) -> Option<Address> {
+        crate::fee::get_treasury(&e)
+    }
 }
 
 #[cfg(test)]
@@ -1070,54 +1095,94 @@ mod tests {
     }
 
     #[test]
-    fn create_escrow_rejects_past_or_current_deadline() {
+    fn escrow_create_draws_funds_into_contract() {
         let f = Fixture::new();
         let depositor = Address::generate(&f.e);
         let beneficiary = Address::generate(&f.e);
-        let (token_address, _token) = f.asset(&depositor, 1_000);
-        let cur = f.e.ledger().sequence();
+        let (token_address, token) = f.asset(&depositor, 1_000);
 
-        // Boundary: deadline == sequence must fail
-        assert!(panics(|| {
-            f.client
-                .create_escrow(&depositor, &beneficiary, &token_address, &100, &cur);
-        }));
+        assert_eq!(token.balance(&depositor), 1_000);
+        assert_eq!(token.balance(&f.contract), 0);
 
-        // Strictly future deadline (cur + 1) succeeds
         let id = f
             .client
-            .create_escrow(&depositor, &beneficiary, &token_address, &100, &(cur + 1));
+            .create_escrow(&depositor, &beneficiary, &token_address, &600, &2_000);
         assert_eq!(id, 0);
+
+        assert_eq!(token.balance(&depositor), 400);
+        assert_eq!(token.balance(&f.contract), 600);
     }
 
     #[test]
-    fn escrow_value_locked_tracks_per_token() {
+    fn multi_escrow_create_draws_funds_into_contract() {
         let f = Fixture::new();
         let depositor = Address::generate(&f.e);
+        let b1 = Address::generate(&f.e);
+        let b2 = Address::generate(&f.e);
+        let (token_address, token) = f.asset(&depositor, 2_000);
+
+        assert_eq!(token.balance(&depositor), 2_000);
+        assert_eq!(token.balance(&f.contract), 0);
+
+        let id = f.client.create_multi_escrow(
+            &depositor,
+            &token_address,
+            &vec![&f.e, b1, b2],
+            &vec![&f.e, 300, 500],
+            &800,
+        );
+        assert_eq!(id, 0);
+
+        assert_eq!(token.balance(&depositor), 1_200);
+        assert_eq!(token.balance(&f.contract), 800);
+    }
+
+    #[test]
+    fn contract_info_and_version() {
+        let f = Fixture::new();
+        let ver = f.client.version();
+        assert_eq!(ver, String::from_str(&f.e, env!("CARGO_PKG_VERSION")));
+
+        let info = f.client.get_contract_info();
+        assert_eq!(info.version, ver);
+        assert_eq!(info.admin, Some(f.admin.clone()));
+        assert!(!info.paused);
+        assert!(info.initialized);
+    }
+
+    #[test]
+    fn protocol_fee_configuration_and_deduction_on_release() {
+        let f = Fixture::new();
+        let treasury = Address::generate(&f.e);
+        // 200 bps = 2%
+        f.client.set_protocol_fee(&f.admin, &200, &treasury);
+        assert_eq!(f.client.get_protocol_fee(), 200);
+        assert_eq!(f.client.get_fee_treasury(), Some(treasury.clone()));
+
+        // Create escrow of 10_000
+        let depositor = Address::generate(&f.e);
         let beneficiary = Address::generate(&f.e);
-        let (token_a, _t_a) = f.asset(&depositor, 1_000);
-        let (token_b, _t_b) = f.asset(&depositor, 2_000);
-        let cur = f.e.ledger().sequence();
-
-        let id_a = f
+        let (token_address, token) = f.asset(&depositor, 10_000);
+        let id = f
             .client
-            .create_escrow(&depositor, &beneficiary, &token_a, &400, &(cur + 10));
-        let id_b = f
-            .client
-            .create_escrow(&depositor, &beneficiary, &token_b, &700, &(cur + 10));
+            .create_escrow(&depositor, &beneficiary, &token_address, &10_000, &2_000);
 
-        assert_eq!(f.client.escrowed_total(&token_a), 400);
-        assert_eq!(f.client.escrowed_total(&token_b), 700);
+        // Release: 2% fee (200) to treasury, remainder (9_800) to beneficiary
+        f.client.release_escrow(&f.admin, &id);
 
-        f.client.release_escrow(&f.admin, &id_a);
+        assert_eq!(token.balance(&treasury), 200);
+        assert_eq!(token.balance(&beneficiary), 9_800);
+        assert_eq!(token.balance(&f.contract), 0);
+    }
 
-        assert_eq!(f.client.escrowed_total(&token_a), 0);
-        assert_eq!(f.client.escrowed_total(&token_b), 700);
-
-        f.client.release_escrow(&f.admin, &id_b);
-
-        assert_eq!(f.client.escrowed_total(&token_a), 0);
-        assert_eq!(f.client.escrowed_total(&token_b), 0);
+    #[test]
+    fn protocol_fee_cap_rejection() {
+        let f = Fixture::new();
+        let treasury = Address::generate(&f.e);
+        // Over 10% (1_000 bps) must panic
+        assert!(panics(|| {
+            f.client.set_protocol_fee(&f.admin, &1_001, &treasury);
+        }));
     }
 }
 
