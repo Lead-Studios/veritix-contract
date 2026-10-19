@@ -100,7 +100,45 @@ pub struct EscrowRefunded {
 pub struct DisputeRaised {
     #[topic]
     pub claimant: Address,
-    pub escrow_id: u64,
+    pub escrow_id: u32,
+}
+
+/// A dispute ruling was recorded.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeResolved {
+    #[topic]
+    pub resolver: Address,
+    pub escrow_id: u32,
+    pub winner: Address,
+}
+
+/// An appeal was filed on a dispute.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeAppealed {
+    #[topic]
+    pub caller: Address,
+    pub escrow_id: u32,
+}
+
+/// A dispute was finalised and settled.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeFinalised {
+    #[topic]
+    pub resolver: Address,
+    pub escrow_id: u32,
+    pub winner: Address,
+}
+
+/// A recurring payment schedule was cancelled.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecurringCancelled {
+    #[topic]
+    pub caller: Address,
+    pub recurring_id: u64,
 }
 
 /// A multi-beneficiary escrow was created.
@@ -124,6 +162,19 @@ pub struct MultiEscrowCreated {
 #[contractevent(data_format = "vec")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MultiEscrowReleased {
+    #[topic]
+    pub depositor: Address,
+    pub id: u64,
+    pub total: i128,
+}
+
+/// A multi-beneficiary escrow was refunded to its depositor.
+///
+/// Topics are `["multi_escrow_refunded", depositor: Address]` and the data is
+/// `[id: u64, total: i128]`.
+#[contractevent(data_format = "vec")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultiEscrowRefunded {
     #[topic]
     pub depositor: Address,
     pub id: u64,

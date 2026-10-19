@@ -1,5 +1,4 @@
-use crate::control;
-use crate::events::{Burn, Clawback, Mint, Transfer};
+use crate::events::{Clawback, Mint, Transfer};
 use crate::storage_types::DataKey;
 use crate::validation::require_positive_amount;
 use soroban_sdk::{Address, Env};
@@ -14,7 +13,10 @@ pub fn total_supply(e: &Env) -> i128 {
 
 /// The configured hard cap, or 0 when supply is uncapped.
 pub fn max_supply(e: &Env) -> i128 {
-    e.storage().persistent().get(&DataKey::MaxSupply).unwrap_or(0)
+    e.storage()
+        .persistent()
+        .get(&DataKey::MaxSupply)
+        .unwrap_or(0)
 }
 
 /// Tokens held by `account`. An absent key means a zero balance.
@@ -23,6 +25,31 @@ pub fn balance_of(e: &Env, account: &Address) -> i128 {
         .persistent()
         .get(&DataKey::BalanceOf(account.clone()))
         .unwrap_or(0)
+}
+
+/// Credits `amount` to `account` without touching total supply.
+///
+pub fn holders(e: &Env) -> soroban_sdk::Vec<Address> {
+    e.storage()
+        .persistent()
+        .get(&DataKey::HolderSet)
+        .unwrap_or_else(|| soroban_sdk::Vec::new(e))
+}
+
+fn add_holder(e: &Env, account: &Address) {
+    let mut set = holders(e);
+    if !set.contains(account.clone()) {
+        set.push_back(account.clone());
+        e.storage().persistent().set(&DataKey::HolderSet, &set);
+    }
+}
+
+fn remove_holder(e: &Env, account: &Address) {
+    let mut set = holders(e);
+    if let Some(index) = set.first_index_of(account.clone()) {
+        set.remove(index);
+        e.storage().persistent().set(&DataKey::HolderSet, &set);
+    }
 }
 
 /// Credits `amount` to `account` without touching total supply.
@@ -36,6 +63,7 @@ pub fn credit(e: &Env, account: &Address, amount: i128) {
     e.storage()
         .persistent()
         .set(&DataKey::BalanceOf(account.clone()), &new_balance);
+    add_holder(e, account);
 }
 
 /// Debits `amount` from `account`.
@@ -46,13 +74,17 @@ pub fn credit(e: &Env, account: &Address, amount: i128) {
 pub fn debit(e: &Env, account: &Address, amount: i128) {
     let balance = balance_of(e, account);
     if balance < amount {
-        panic!("InsufficientBalance: {} available, {} required", balance, amount);
+        panic!(
+            "InsufficientBalance: {} available, {} required",
+            balance, amount
+        );
     }
     let new_balance = balance - amount;
     if new_balance == 0 {
         e.storage()
             .persistent()
             .remove(&DataKey::BalanceOf(account.clone()));
+        remove_holder(e, account);
     } else {
         e.storage()
             .persistent()
@@ -75,7 +107,10 @@ pub fn increase_supply(e: &Env, amount: i128) {
         .unwrap_or_else(|| panic!("SupplyOverflow: minting {} would overflow i128", amount));
     let cap = max_supply(e);
     if cap > 0 && new_supply > cap {
-        panic!("SupplyCapExceeded: {} would exceed the cap of {}", new_supply, cap);
+        panic!(
+            "SupplyCapExceeded: {} would exceed the cap of {}",
+            new_supply, cap
+        );
     }
     e.storage()
         .persistent()
@@ -121,6 +156,33 @@ pub fn mint(e: &Env, to: &Address, amount: i128) {
     .publish(e);
 }
 
+/// Decreases total supply by `amount`.
+///
+/// # Panics
+///
+/// Panics with `SupplyUnderflow` if `amount` is greater than total supply.
+pub fn decrease_supply(e: &Env, amount: i128) {
+    let supply = total_supply(e);
+    let new_supply = supply
+        .checked_sub(amount)
+        .unwrap_or_else(|| panic!("SupplyUnderflow: clawback {} would reduce supply below 0", amount));
+    e.storage()
+        .persistent()
+        .set(&DataKey::TotalSupply, &new_supply);
+}
+
+/// Recovers `amount` from `from` on the admin's authority.
+pub fn clawback(e: &Env, from: &Address, amount: i128) {
+    require_positive_amount(amount);
+    debit(e, from, amount);
+    decrease_supply(e, amount);
+    Clawback {
+        from: from.clone(),
+        amount,
+    }
+    .publish(e);
+}
+
 /// Moves `amount` of tokens from `from` to `to`, leaving total supply untouched.
 ///
 /// The debit runs before the credit so an insufficient balance aborts before the
@@ -131,6 +193,13 @@ pub fn mint(e: &Env, to: &Address, amount: i128) {
 /// Panics on a non-positive `amount` or when `from` holds less than `amount`.
 pub fn transfer(e: &Env, from: &Address, to: &Address, amount: i128) {
     require_positive_amount(amount);
+    crate::control::require_not_paused(e);
+    crate::control::require_not_frozen(e, from);
+    crate::control::require_not_frozen(e, to);
+    crate::authorization::require_authorized(e, from);
+    crate::authorization::require_authorized(e, to);
+    crate::whitelist::require_whitelisted(e, from);
+    crate::whitelist::require_whitelisted(e, to);
     debit(e, from, amount);
     credit(e, to, amount);
     Transfer {
