@@ -209,7 +209,7 @@ pub fn is_settled(e: &Env, id: u32) -> bool {
 /// being paid: once `raise_dispute` opens a dispute over the escrow, neither
 /// release nor refund may move funds until a ruling is final.
 fn require_no_open_dispute(e: &Env, id: u32) {
-    if crate::dispute::is_dispute_open(e, id as u64) {
+    if crate::dispute::is_dispute_open(e, id) {
         panic!(
             "EscrowDisputed: escrow {} is frozen by an open dispute",
             id
