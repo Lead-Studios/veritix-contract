@@ -5,9 +5,13 @@
 //! atomic — either every leg is paid or the whole call reverts — so a
 //! beneficiary can never be skipped because a later leg failed.
 
-use crate::events::{MultiEscrowCreated, MultiEscrowReleased};
+use crate::escrow::pay;
+use crate::events::{MultiEscrowCreated, MultiEscrowRefunded, MultiEscrowReleased};
 use crate::storage_types::{DataKey, MultiEscrowRecord, MultiEscrowStatus};
-use soroban_sdk::{token, Address, Env, Vec};
+use soroban_sdk::{Address, Env, Vec};
+
+/// Maximum number of beneficiaries allowed in a multi-beneficiary escrow.
+pub const MAX_MULTI_ESCROW_BENEFICIARIES: u32 = 100;
 
 /// Number of multi-escrows created so far, which is also the next id.
 pub fn count(e: &Env) -> u64 {
@@ -39,15 +43,6 @@ pub fn is_settled(e: &Env, id: u64) -> bool {
         record(e, id).status,
         MultiEscrowStatus::Released | MultiEscrowStatus::Refunded
     )
-}
-
-/// Sends `amount` of `token` out of the contract to `to`.
-fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
-    token::TokenClient::new(e, token_address).transfer(
-        &e.current_contract_address(),
-        to,
-        &amount,
-    );
 }
 
 /// Holds `total` of `token` split across `beneficiaries` and returns the new
@@ -83,6 +78,13 @@ pub fn create(
     }
     if beneficiaries.is_empty() {
         panic!("MultiEscrowEmpty: at least one beneficiary is required");
+    }
+    if beneficiaries.len() > MAX_MULTI_ESCROW_BENEFICIARIES {
+        panic!(
+            "MultiEscrowTooManyBeneficiaries: {} exceeds maximum allowed {}",
+            beneficiaries.len(),
+            MAX_MULTI_ESCROW_BENEFICIARIES
+        );
     }
 
     let mut sum: i128 = 0;
@@ -162,9 +164,6 @@ pub fn release(e: &Env, caller: &Address, id: u64) {
         pay(e, &record.token, &beneficiary, amount);
     }
 
-    // Drain the record to zero: every leg was paid, so nothing is still owed.
-    let drained = Vec::new(e);
-    record.amounts = drained;
     record.status = MultiEscrowStatus::Released;
     e.storage()
         .persistent()
@@ -207,4 +206,11 @@ pub fn refund(e: &Env, caller: &Address, id: u64) {
     e.storage()
         .persistent()
         .set(&DataKey::MultiEscrow(id), &record);
+
+    MultiEscrowRefunded {
+        depositor: record.depositor.clone(),
+        id,
+        total: record.total,
+    }
+    .publish(e);
 }

@@ -247,10 +247,20 @@ fn require_settlement_authority(e: &Env, caller: &Address, record: &EscrowRecord
 }
 
 /// Sends `amount` of `token` out of the contract to `to`.
-fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
+pub fn pay(e: &Env, token_address: &Address, to: &Address, amount: i128) {
     token::TokenClient::new(e, token_address).transfer(
         &e.current_contract_address(),
         to,
+        &amount,
+    );
+}
+
+/// Pulls `amount` of `token` from `from` into the contract.
+pub fn collect(e: &Env, token_address: &Address, from: &Address, amount: i128) {
+    let contract = e.current_contract_address();
+    token::TokenClient::new(e, token_address).transfer(
+        from,
+        &contract,
         &amount,
     );
 }
