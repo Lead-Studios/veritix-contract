@@ -159,56 +159,47 @@ impl VeriTixPay {
         balance::transfer(&e, &from, &to, amount);
     }
 
-    // ---- Allowance -----------------------------------------------------
-
-    /// Authorizes `spender` to move up to `amount` of `owner`'s tokens.
+    /// The tokens `spender` may still move on `from`'s behalf.
     ///
-    /// Overwrites rather than accumulating; use [`Self::increase_allowance`] to
-    /// top up an existing grant.
-    pub fn approve(
-        e: Env,
-        owner: Address,
-        spender: Address,
-        amount: i128,
-        expiration_ledger: u32,
-    ) {
-        allowance::approve(&e, &owner, &spender, amount, expiration_ledger);
-    }
-
-    /// The amount `spender` may still move on `owner`'s behalf.
-    ///
-    /// An expired allowance reads as `0` rather than as an error.
+    /// Reads as `0` once the allowance has expired: an expired grant is spent,
+    /// not an error.
     pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
         allowance::allowance(&e, &from, &spender)
     }
 
-    /// The ledger on which the `owner`/`spender` allowance lapses.
+    /// The ledger `from`'s allowance to `spender` expires on, or 0 once it has.
     pub fn allowance_expiration(e: Env, from: Address, spender: Address) -> u32 {
         allowance::allowance_expiration(&e, &from, &spender)
     }
 
-    /// Moves `amount` of `owner`'s tokens to `to`, spending the allowance.
+    /// Moves `amount` of tokens from `from` to `to` under `spender`'s
+    /// allowance.
     ///
-    /// The caller is the spender, so the spender's own authorisation is what
-    /// authorises the call and the owner's allowance is what caps it.
-    pub fn transfer_from(e: Env, from: Address, to: Address, spender: Address, amount: i128) {
-        allowance::transfer_from(&e, &from, &to, &spender, amount);
+    /// The spender authorizes the call and the allowance is consumed before the
+    /// tokens move, so a spender can never move more than `from` approved — and
+    /// a transfer that then fails on the balance reverts the allowance
+    /// reduction with it.
+    pub fn transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        spender.require_auth();
+        allowance::consume_allowance(&e, &from, &spender, amount);
+        balance::transfer(&e, &from, &to, amount);
     }
 
-    /// Raises an allowance by `amount`, preserving the grant's expiry.
-    pub fn increase_allowance(
-        e: Env,
-        owner: Address,
-        spender: Address,
-        amount: i128,
-        expiration_ledger: u32,
-    ) {
-        allowance::increase_allowance(&e, &owner, &spender, amount, expiration_ledger);
+    /// Burns `amount` of `from`'s tokens, taking them out of circulation.
+    pub fn burn(e: Env, from: Address, amount: i128) {
+        from.require_auth();
+        balance::burn(&e, &from, amount);
     }
 
-    /// Lowers an allowance by `amount`, saturating at zero.
-    pub fn decrease_allowance(e: Env, owner: Address, spender: Address, amount: i128) {
-        allowance::decrease_allowance(&e, &owner, &spender, amount);
+    /// Burns `amount` of `from`'s tokens under `spender`'s allowance.
+    ///
+    /// The allowance is consumed first, for the same reason
+    /// [`transfer_from`](Self::transfer_from) does: a spender acting on
+    /// `from`'s behalf must be bounded by what `from` approved.
+    pub fn burn_from(e: Env, spender: Address, from: Address, amount: i128) {
+        spender.require_auth();
+        allowance::consume_allowance(&e, &from, &spender, amount);
+        balance::burn(&e, &from, amount);
     }
 
     // ---- Escrow ---------------------------------------------------------

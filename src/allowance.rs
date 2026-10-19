@@ -45,15 +45,18 @@ pub fn allowance(e: &Env, from: &Address, spender: &Address) -> i128 {
     }
 }
 
-/// The ledger on which the `owner`/`spender` allowance lapses.
+/// The ledger the `owner`/`spender` allowance expires on, or 0 once it has.
 ///
-/// This reads the *stored* expiry, so it is `0` when no grant has ever been
-/// made, and it is unchanged by a spend — only [`approve`],
-/// [`increase_allowance`] and [`decrease_allowance`] move it. Compare it
-/// against `e.ledger().sequence()` to decide whether the grant is still live;
-/// [`is_expired`] already does exactly that.
+/// An expired allowance reports `0` rather than its stale deadline: the two
+/// figures are only ever read together, and a live-looking deadline beside a
+/// zero amount is a trap for a client that reads the deadline alone.
 pub fn allowance_expiration(e: &Env, from: &Address, spender: &Address) -> u32 {
-    load(e, from, spender).expiration_ledger
+    let stored = load(e, from, spender);
+    if is_expired(e, &stored) {
+        0
+    } else {
+        stored.expiration_ledger
+    }
 }
 
 /// Every spender `owner` currently holds a live allowance with, in grant order.
