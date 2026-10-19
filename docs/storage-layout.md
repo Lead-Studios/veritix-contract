@@ -35,6 +35,7 @@ Every `DataKey` variant currently defined in `src/storage_types.rs`. All keys ar
 | `Allowance(Address, Address)` | Spending allowance granted by `owner` to `spender`. | Persistent |
 | `AllowanceSpenders(Address)` | The spenders an owner currently has an allowance with, in grant order. | Persistent |
 | `EscrowLocked(Address)` | The portion of an account's balance held by an active escrow. | Persistent |
+| `Holders` | Every account that currently holds a non-zero balance, in first-credit order. | Persistent |
 | `Paused` | Whether the whole contract is paused. | Persistent |
 | `WhitelistEnabled` | Whether token holders must be whitelisted. | Persistent |
 | `Frozen(Address)` | Whether an account is frozen and cannot move tokens. | Persistent |

@@ -1,7 +1,25 @@
 use crate::metadata::{self, TokenMetadata};
 use crate::storage_types::{DataKey, EscrowRecord, RecurringExecution, RecurringPayment};
-use crate::{admin, allowance, balance, escrow, recurring, whitelist};
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use crate::{admin, balance, escrow, recurring, whitelist};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, String, Vec};
+
+/// Requires the admin's authorization for a clawback, plus the co-signer's
+/// when one has been configured.
+///
+/// Dual authorization raises the bar to two keys for the one operation that
+/// confiscates tokens. With no co-signer set the check is the admin's alone —
+/// the control is opt-in, not a second mandatory key, so a single-operator
+/// deployment is not forced to appoint one.
+fn require_clawback_auth(e: &Env, admin_addr: &Address) {
+    admin::check_admin(e, admin_addr);
+    if let Some(cosigner) = e
+        .storage()
+        .persistent()
+        .get::<_, Address>(&DataKey::ClawbackCosigner)
+    {
+        cosigner.require_auth();
+    }
+}
 
 #[contract]
 pub struct VeriTixPay;
@@ -159,47 +177,53 @@ impl VeriTixPay {
         balance::transfer(&e, &from, &to, amount);
     }
 
-    /// The tokens `spender` may still move on `from`'s behalf.
+    /// Moves `amount` of tokens from `from` to `to`, attaching `memo`.
     ///
-    /// Reads as `0` once the allowance has expired: an expired grant is spent,
-    /// not an error.
-    pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
-        allowance::allowance(&e, &from, &spender)
-    }
-
-    /// The ledger `from`'s allowance to `spender` expires on, or 0 once it has.
-    pub fn allowance_expiration(e: Env, from: Address, spender: Address) -> u32 {
-        allowance::allowance_expiration(&e, &from, &spender)
-    }
-
-    /// Moves `amount` of tokens from `from` to `to` under `spender`'s
-    /// allowance.
-    ///
-    /// The spender authorizes the call and the allowance is consumed before the
-    /// tokens move, so a spender can never move more than `from` approved — and
-    /// a transfer that then fails on the balance reverts the allowance
-    /// reduction with it.
-    pub fn transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128) {
-        spender.require_auth();
-        allowance::consume_allowance(&e, &from, &spender, amount);
-        balance::transfer(&e, &from, &to, amount);
-    }
-
-    /// Burns `amount` of `from`'s tokens, taking them out of circulation.
-    pub fn burn(e: Env, from: Address, amount: i128) {
+    /// The memo is capped at 64 bytes; a larger one is refused before anything
+    /// moves, because it is every reader of the ledger that pays for it.
+    pub fn transfer_with_memo(e: Env, from: Address, to: Address, amount: i128, memo: Bytes) {
         from.require_auth();
-        balance::burn(&e, &from, amount);
+        balance::transfer_with_memo(&e, &from, &to, amount, &memo);
     }
 
-    /// Burns `amount` of `from`'s tokens under `spender`'s allowance.
+    /// Recovers `amount` of `from`'s tokens into the supply, admin-only.
     ///
-    /// The allowance is consumed first, for the same reason
-    /// [`transfer_from`](Self::transfer_from) does: a spender acting on
-    /// `from`'s behalf must be bounded by what `from` approved.
-    pub fn burn_from(e: Env, spender: Address, from: Address, amount: i128) {
-        spender.require_auth();
-        allowance::consume_allowance(&e, &from, &spender, amount);
-        balance::burn(&e, &from, amount);
+    /// Burns the tokens and emits `clawback` rather than `burn`, so an auditor
+    /// can tell an admin recovery from a holder's own burn. When a clawback
+    /// co-signer has been configured, both it and the admin must authorize the
+    /// call.
+    pub fn clawback(e: Env, admin_addr: Address, from: Address, amount: i128) {
+        require_clawback_auth(&e, &admin_addr);
+        balance::clawback(&e, &admin_addr, &from, amount);
+    }
+
+    /// What `account` can actually move: its balance less anything locked in
+    /// an active escrow, and 0 while the account is frozen.
+    pub fn spendable_balance(e: Env, account: Address) -> i128 {
+        balance::spendable_balance(&e, &account)
+    }
+
+    /// The portion of `account`'s balance held by an active escrow.
+    pub fn escrow_locked(e: Env, account: Address) -> i128 {
+        balance::escrow_locked(&e, &account)
+    }
+
+    /// Number of accounts currently holding a non-zero balance.
+    pub fn total_holders(e: Env) -> u32 {
+        balance::total_holders(&e)
+    }
+
+    /// Every current holder, in first-credit order.
+    ///
+    /// Grows with the number of users; [`get_holders_page`](Self::get_holders_page)
+    /// is the bounded read.
+    pub fn get_holders(e: Env) -> Vec<Address> {
+        balance::get_holders(&e)
+    }
+
+    /// A page of holders: at most 50 entries from `offset`.
+    pub fn get_holders_page(e: Env, offset: u32, limit: u32) -> Vec<Address> {
+        balance::holders_page(&e, offset, limit)
     }
 
     // ---- Escrow ---------------------------------------------------------
@@ -1242,6 +1266,35 @@ pub mod testing {
             self.client.mint(&self.admin, &holder, &amount);
             holder
         }
+
+        /// Locks `amount` of `account`'s balance in an escrow, without going
+        /// through `create_escrow` — the lock is the bookkeeping entry
+        /// `spendable_balance` reads, and a test can set it directly.
+        pub fn set_escrow_lock(&self, account: &Address, amount: i128) {
+            self.e.as_contract(&self.contract_id, || {
+                self.e
+                    .storage()
+                    .persistent()
+                    .set(&DataKey::EscrowLocked(account.clone()), &amount);
+            });
+        }
+
+        /// Sets the supply cap directly, bypassing whatever entry point would
+        /// normally configure it.
+        pub fn set_max_supply(&self, amount: i128) {
+            self.e.as_contract(&self.contract_id, || {
+                self.e
+                    .storage()
+                    .persistent()
+                    .set(&DataKey::MaxSupply, &amount);
+            });
+        }
+    }
+
+    /// The empty holder set, for asserting against `get_holders` before
+    /// anything has been minted.
+    pub fn no_holders(e: &Env) -> Vec<Address> {
+        Vec::new(e)
     }
 
     /// `len` bytes, all set to `fill`.

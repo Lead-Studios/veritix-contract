@@ -27,12 +27,8 @@ pub enum DataKey {
     AllowanceSpenders(Address),
     /// The portion of an account's balance held by an active escrow.
     EscrowLocked(Address),
-    /// Every account that currently holds a positive balance.
-    HolderSet,
-    /// Balance snapshot taken for an address under a snapshot id.
-    Snapshot(u32, Address),
-    /// Total balance snapshotted under a snapshot id.
-    SnapshotTotal(u32),
+    /// Every account that currently holds a non-zero balance, in first-credit order.
+    Holders,
 
     // --- Compliance ----------------------------------------------------------
     /// Whether the whole contract is paused.
