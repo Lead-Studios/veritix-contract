@@ -380,3 +380,26 @@ fn resolve_appeal_requires_an_appeal() {
 
     client.resolve_appeal(&resolver, &id, &beneficiary);
 }
+
+#[test]
+#[should_panic(expected = "DisputeSelfArbitration")]
+fn party_cannot_arbitrate_own_dispute() {
+    let (e, cid, _resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_escrow(&e, &cid, id, &escrow(&e, &depositor, &beneficiary, 100), 100);
+    client.raise_dispute(&depositor, &id, &Some(depositor.clone()));
+}
+
+#[test]
+#[should_panic(expected = "WinnerMismatch")]
+fn winner_cannot_be_changed_at_finalisation() {
+    let (e, cid, resolver, depositor, beneficiary, id) = setup();
+    let client = DisputeHarnessClient::new(&e, &cid);
+    seed_full(&e, &cid, &client, &resolver, &depositor, &beneficiary, id);
+
+    client.resolve_dispute(&resolver, &id, &beneficiary);
+    let ruling = e.ledger().sequence();
+    jump(&e, ruling + APPEAL_WINDOW_LEDGERS + 1);
+
+    client.resolve_dispute(&resolver, &id, &depositor);
+}

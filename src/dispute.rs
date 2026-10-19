@@ -20,7 +20,6 @@
 
 use soroban_sdk::{Address, Env};
 
-use crate::balance;
 use crate::storage_types::{
     bump_persistent, DataKey, DisputeRecord, DisputeStatus, EscrowRecord, EscrowStatus,
 };
@@ -147,12 +146,21 @@ pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u32, resolver: Opti
             escrow_id
         );
     }
+    let resolved_resolver = match resolver {
+        Some(r) => {
+            if &r == claimant || r == escrow.depositor || r == escrow.beneficiary {
+                panic!("DisputeSelfArbitration: a party cannot arbitrate their own dispute");
+            }
+            Some(r)
+        }
+        None => Some(get_arbiter(e)),
+    };
     let record = DisputeRecord {
         claimant: claimant.clone(),
         escrow_id,
         status: DisputeStatus::Open,
         opened_ledger: e.ledger().sequence(),
-        resolver,
+        resolver: resolved_resolver,
         resolved_ledger: 0,
         winner: None,
         is_final: false,
@@ -256,16 +264,16 @@ pub fn resolve_dispute(e: &Env, resolver: Address, escrow_id: u32, winner: Addre
                     record.resolved_ledger + APPEAL_WINDOW_LEDGERS
                 );
             }
-            record.is_final = true;
-            record.winner = Some(winner.clone());
-            write_dispute(e, escrow_id, &record);
-            settle_escrow(e, escrow_id, &winner, &escrow);
-            crate::events::DisputeFinalised {
-                resolver: resolver.clone(),
-                escrow_id,
-                winner: winner.clone(),
+            let stored_winner = record.winner.as_ref().unwrap();
+            if &winner != stored_winner {
+                panic!(
+                    "WinnerMismatch: ruling winner {:?} cannot be changed to {:?}",
+                    stored_winner, winner
+                );
             }
-            .publish(e);
+            record.is_final = true;
+            write_dispute(e, escrow_id, &record);
+            settle_escrow(e, escrow_id, stored_winner, &escrow);
         }
         _ => panic!(
             "DisputeNotOpen: escrow {} is in {:?}, not Open",
@@ -408,30 +416,25 @@ pub fn expire_dispute(e: &Env, caller: &Address, escrow_id: u32) {
 /// Moves the escrowed amount to the winner when the winner is the beneficiary
 /// (a refund simply leaves the funds with the depositor), and marks the escrow
 /// `Released` or `Refunded`.
-fn settle_escrow(e: &Env, escrow_id: u32, winner: &Address, escrow: &EscrowRecord) {
-    let depositor = escrow.depositor.clone();
+fn settle_escrow(e: &Env, escrow_id: u64, winner: &Address, escrow: &EscrowRecord) {
     let amount = escrow.amount;
     crate::validation::require_positive_amount(amount);
 
-    // The transfer debits the depositor and credits the winner.
-    if winner == &escrow.beneficiary {
-        balance::transfer(e, &depositor, winner, amount);
-        write_escrow(
-            e,
-            escrow_id,
-            &EscrowRecord {
-                status: EscrowStatus::Released,
-                ..escrow.clone()
-            },
-        );
+    crate::escrow::pay(e, &escrow.token, winner, amount);
+    crate::escrow::decrease_value_locked(e, amount);
+
+    let status = if winner == &escrow.beneficiary {
+        EscrowStatus::Released
     } else {
-        write_escrow(
-            e,
-            escrow_id,
-            &EscrowRecord {
-                status: EscrowStatus::Refunded,
-                ..escrow.clone()
-            },
-        );
-    }
+        EscrowStatus::Refunded
+    };
+    write_escrow(
+        e,
+        escrow_id,
+        &EscrowRecord {
+            status,
+            amount: 0,
+            ..escrow.clone()
+        },
+    );
 }
