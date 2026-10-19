@@ -242,6 +242,58 @@ pub fn get_recurring_history(e: &Env, recurring_id: u64) -> Vec<RecurringExecuti
         .unwrap_or_else(|| Vec::new(e))
 }
 
+/// Cancels an active recurring schedule. Must be called by payer or payee.
+///
+/// Sets `active = false`, removes the schedule from both payer and payee indexes,
+/// and emits a `RecurringCancelled` event.
+pub fn cancel_recurring(e: &Env, caller: &soroban_sdk::Address, recurring_id: u64) {
+    caller.require_auth();
+    let key = DataKey::Recurring(recurring_id);
+    let mut schedule = e
+        .storage()
+        .persistent()
+        .get::<_, RecurringPayment>(&key)
+        .unwrap_or_else(|| panic!("RecurringNotFound: payment {} does not exist", recurring_id));
+
+    if caller != &schedule.payer && caller != &schedule.payee {
+        panic!("Unauthorized: caller is neither payer nor payee");
+    }
+    if !schedule.active {
+        panic!("RecurringInactive: payment {} is inactive", recurring_id);
+    }
+
+    schedule.active = false;
+    e.storage().persistent().set(&key, &schedule);
+
+    let payer_key = DataKey::PayerRecurrings(schedule.payer.clone());
+    if let Some(payer_ids) = e.storage().persistent().get::<_, Vec<u64>>(&payer_key) {
+        let mut new_ids = Vec::new(e);
+        for id in payer_ids.iter() {
+            if id != recurring_id {
+                new_ids.push_back(id);
+            }
+        }
+        e.storage().persistent().set(&payer_key, &new_ids);
+    }
+
+    let payee_key = DataKey::PayeeRecurrings(schedule.payee.clone());
+    if let Some(payee_ids) = e.storage().persistent().get::<_, Vec<u64>>(&payee_key) {
+        let mut new_ids = Vec::new(e);
+        for id in payee_ids.iter() {
+            if id != recurring_id {
+                new_ids.push_back(id);
+            }
+        }
+        e.storage().persistent().set(&payee_key, &new_ids);
+    }
+
+    crate::events::RecurringCancelled {
+        caller: caller.clone(),
+        recurring_id,
+    }
+    .publish(e);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

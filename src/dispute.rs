@@ -36,7 +36,7 @@ pub const APPEAL_WINDOW_LEDGERS: u32 = 120_960;
 /// # Panics
 ///
 /// With `DisputeNotFound` when no dispute is open over `escrow_id`.
-fn read_dispute(e: &Env, escrow_id: u64) -> DisputeRecord {
+fn read_dispute(e: &Env, escrow_id: u32) -> DisputeRecord {
     let key = DataKey::Dispute(escrow_id);
     let record = e
         .storage()
@@ -48,21 +48,15 @@ fn read_dispute(e: &Env, escrow_id: u64) -> DisputeRecord {
 }
 
 /// Writes a dispute record, extending its storage TTL.
-fn write_dispute(e: &Env, escrow_id: u64, record: &DisputeRecord) {
+fn write_dispute(e: &Env, escrow_id: u32, record: &DisputeRecord) {
     let key = DataKey::Dispute(escrow_id);
     e.storage().persistent().set(&key, record);
     bump_persistent(e, &key);
 }
 
 /// The storage key `escrow.rs` stores escrow `escrow_id` under.
-///
-/// # Panics
-///
-/// With `EscrowNotFound` when `escrow_id` is too large to be an escrow id.
-fn escrow_key(escrow_id: u64) -> DataKey {
-    let id = u32::try_from(escrow_id)
-        .unwrap_or_else(|_| panic!("EscrowNotFound: no escrow {}", escrow_id));
-    DataKey::EscrowRecord(id)
+fn escrow_key(escrow_id: u32) -> DataKey {
+    DataKey::EscrowRecord(escrow_id)
 }
 
 /// Reads the escrow a dispute settles, extending its storage TTL.
@@ -70,7 +64,7 @@ fn escrow_key(escrow_id: u64) -> DataKey {
 /// # Panics
 ///
 /// With `EscrowNotFound` when no escrow `escrow_id` exists.
-fn read_escrow(e: &Env, escrow_id: u64) -> EscrowRecord {
+fn read_escrow(e: &Env, escrow_id: u32) -> EscrowRecord {
     let key = escrow_key(escrow_id);
     let record = e
         .storage()
@@ -82,7 +76,7 @@ fn read_escrow(e: &Env, escrow_id: u64) -> EscrowRecord {
 }
 
 /// Writes an escrow record, extending its storage TTL.
-fn write_escrow(e: &Env, escrow_id: u64, record: &EscrowRecord) {
+fn write_escrow(e: &Env, escrow_id: u32, record: &EscrowRecord) {
     let key = escrow_key(escrow_id);
     e.storage().persistent().set(&key, record);
     bump_persistent(e, &key);
@@ -128,7 +122,7 @@ pub fn get_arbiter(e: &Env) -> Address {
 /// with `EscrowNotFound` for an unknown escrow, with `EscrowNotActive` unless
 /// the escrow is `Active`, and with `Unauthorized` when the caller is neither
 /// the depositor nor the beneficiary.
-pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u64, resolver: Option<Address>) {
+pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u32, resolver: Option<Address>) {
     if e.storage()
         .persistent()
         .get::<_, DisputeRecord>(&DataKey::Dispute(escrow_id))
@@ -178,7 +172,7 @@ pub fn raise_dispute(e: &Env, claimant: &Address, escrow_id: u64, resolver: Opti
 /// A dispute is live until a ruling is final (an appeal was resolved or an
 /// unappealed ruling lapsed) or the dispute expired. While it is live the
 /// escrow must not be released or refunded.
-pub fn is_dispute_open(e: &Env, escrow_id: u64) -> bool {
+pub fn is_dispute_open(e: &Env, escrow_id: u32) -> bool {
     match e
         .storage()
         .persistent()
@@ -197,7 +191,7 @@ pub fn is_dispute_open(e: &Env, escrow_id: u64) -> bool {
 /// # Panics
 ///
 /// With `DisputeNotFound` when no dispute is open over `escrow_id`.
-pub fn get_dispute(e: &Env, escrow_id: u64) -> DisputeRecord {
+pub fn get_dispute(e: &Env, escrow_id: u32) -> DisputeRecord {
     read_dispute(e, escrow_id)
 }
 
@@ -214,13 +208,11 @@ pub fn get_dispute(e: &Env, escrow_id: u64) -> DisputeRecord {
 /// With `Unauthorized: caller is not the assigned resolver`, `DisputeNotOpen`,
 /// `EscrowNotFound` or `WinnerNotEscrowParty` on invalid input, and
 /// `AppealWindowOpen` when called before the appeal window has lapsed.
-pub fn resolve_dispute(e: &Env, resolver: Address, escrow_id: u64, winner: Address) {
+pub fn resolve_dispute(e: &Env, resolver: Address, escrow_id: u32, winner: Address) {
     resolver.require_auth();
     let mut record = read_dispute(e, escrow_id);
 
-    let assigned = record.resolver.clone().unwrap_or_else(|| {
-        panic!("DisputeNoResolver: escrow {} has no assigned resolver", escrow_id)
-    });
+    let assigned = record.resolver.clone().unwrap_or_else(|| get_arbiter(e));
     if assigned != resolver {
         panic!("Unauthorized: caller is not the assigned resolver");
     }
@@ -245,6 +237,12 @@ pub fn resolve_dispute(e: &Env, resolver: Address, escrow_id: u64, winner: Addre
             record.resolved_ledger = ruling_ledger;
             record.winner = Some(winner.clone());
             write_dispute(e, escrow_id, &record);
+            crate::events::DisputeResolved {
+                resolver: resolver.clone(),
+                escrow_id,
+                winner: winner.clone(),
+            }
+            .publish(e);
         }
         // The ruling was already recorded and the appeal window has lapsed with
         // no appeal filed: finalize, settle and pay.
@@ -262,6 +260,12 @@ pub fn resolve_dispute(e: &Env, resolver: Address, escrow_id: u64, winner: Addre
             record.winner = Some(winner.clone());
             write_dispute(e, escrow_id, &record);
             settle_escrow(e, escrow_id, &winner, &escrow);
+            crate::events::DisputeFinalised {
+                resolver: resolver.clone(),
+                escrow_id,
+                winner: winner.clone(),
+            }
+            .publish(e);
         }
         _ => panic!(
             "DisputeNotOpen: escrow {} is in {:?}, not Open",
@@ -280,7 +284,7 @@ pub fn resolve_dispute(e: &Env, resolver: Address, escrow_id: u64, winner: Addre
 ///
 /// With `DisputeFinal`, `DisputeNotAppealable`, `AppealWindowClosed` or
 /// `AppealCallerNotParty`.
-pub fn appeal_dispute(e: &Env, caller: &Address, escrow_id: u64) {
+pub fn appeal_dispute(e: &Env, caller: &Address, escrow_id: u32) {
     caller.require_auth();
     let mut record = read_dispute(e, escrow_id);
 
@@ -315,6 +319,11 @@ pub fn appeal_dispute(e: &Env, caller: &Address, escrow_id: u64) {
 
     record.status = DisputeStatus::Appealed;
     write_dispute(e, escrow_id, &record);
+    crate::events::DisputeAppealed {
+        caller: caller.clone(),
+        escrow_id,
+    }
+    .publish(e);
 }
 
 /// Handed down the final, unappealable ruling on an appealed dispute.
@@ -326,13 +335,11 @@ pub fn appeal_dispute(e: &Env, caller: &Address, escrow_id: u64) {
 ///
 /// With `Unauthorized: caller is not the assigned resolver`, `DisputeNotAppealed`,
 /// `EscrowNotFound` or `WinnerNotEscrowParty`.
-pub fn resolve_appeal(e: &Env, resolver: Address, escrow_id: u64, winner: Address) {
+pub fn resolve_appeal(e: &Env, resolver: Address, escrow_id: u32, winner: Address) {
     resolver.require_auth();
     let mut record = read_dispute(e, escrow_id);
 
-    let assigned = record.resolver.clone().unwrap_or_else(|| {
-        panic!("DisputeNoResolver: escrow {} has no assigned resolver", escrow_id)
-    });
+    let assigned = record.resolver.clone().unwrap_or_else(|| get_arbiter(e));
     if assigned != resolver {
         panic!("Unauthorized: caller is not the assigned resolver");
     }
@@ -358,6 +365,42 @@ pub fn resolve_appeal(e: &Env, resolver: Address, escrow_id: u64, winner: Addres
     write_dispute(e, escrow_id, &record);
 
     settle_escrow(e, escrow_id, &winner, &escrow);
+    crate::events::DisputeFinalised {
+        resolver: resolver.clone(),
+        escrow_id,
+        winner: winner.clone(),
+    }
+    .publish(e);
+}
+
+/// Expires a dispute once the escrow's deadline has passed, refunding the depositor.
+///
+/// Can be called by the depositor, beneficiary, or admin.
+pub fn expire_dispute(e: &Env, caller: &Address, escrow_id: u32) {
+    caller.require_auth();
+    let mut record = read_dispute(e, escrow_id);
+    if record.is_final || record.status == DisputeStatus::Expired {
+        panic!("DisputeFinal: dispute on escrow {} is already final", escrow_id);
+    }
+    let escrow = read_escrow(e, escrow_id);
+    if caller != &escrow.depositor && caller != &escrow.beneficiary && !crate::admin::is_admin(e, caller) {
+        panic!(
+            "Unauthorized: only the depositor, beneficiary, or admin may expire dispute on escrow {}",
+            escrow_id
+        );
+    }
+    if e.ledger().sequence() <= escrow.deadline_ledger {
+        panic!(
+            "DisputeNotExpired: escrow {} deadline ledger {} has not passed",
+            escrow_id, escrow.deadline_ledger
+        );
+    }
+
+    record.status = DisputeStatus::Expired;
+    record.is_final = true;
+    write_dispute(e, escrow_id, &record);
+
+    settle_escrow(e, escrow_id, &escrow.depositor, &escrow);
 }
 
 /// Settles the escrow in `winner`'s favour and pays them the escrowed amount.
@@ -365,7 +408,7 @@ pub fn resolve_appeal(e: &Env, resolver: Address, escrow_id: u64, winner: Addres
 /// Moves the escrowed amount to the winner when the winner is the beneficiary
 /// (a refund simply leaves the funds with the depositor), and marks the escrow
 /// `Released` or `Refunded`.
-fn settle_escrow(e: &Env, escrow_id: u64, winner: &Address, escrow: &EscrowRecord) {
+fn settle_escrow(e: &Env, escrow_id: u32, winner: &Address, escrow: &EscrowRecord) {
     let depositor = escrow.depositor.clone();
     let amount = escrow.amount;
     crate::validation::require_positive_amount(amount);
