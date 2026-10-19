@@ -136,7 +136,14 @@ impl VeriTixPay {
         amount: i128,
         deadline_ledger: u32,
     ) -> u32 {
-        escrow::create(&e, &depositor, &beneficiary, &token, amount, deadline_ledger)
+        escrow::create(
+            &e,
+            &depositor,
+            &beneficiary,
+            &token,
+            amount,
+            deadline_ledger,
+        )
     }
 
     /// Pays the beneficiary everything still held and closes the escrow.
@@ -162,33 +169,53 @@ impl VeriTixPay {
     }
 
     /// A page of escrow ids created by `depositor` (at most 50 per call).
-    pub fn get_escrows_by_depositor(e: Env, depositor: Address, start: u32, limit: u32) -> Vec<u32> {
+    pub fn get_escrows_by_depositor(
+        e: Env,
+        depositor: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<u32> {
         escrow::ids_page(&e, &DataKey::DepositorEscrows(depositor), start, limit)
     }
 
     /// A page of escrow ids owed to `beneficiary` (at most 50 per call).
-    pub fn get_escrows_by_beneficiary(e: Env, beneficiary: Address, start: u32, limit: u32) -> Vec<u32> {
+    pub fn get_escrows_by_beneficiary(
+        e: Env,
+        beneficiary: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<u32> {
         escrow::ids_page(&e, &DataKey::BeneficiaryEscrows(beneficiary), start, limit)
     }
 
-    /// Total token amount still held across all active escrows.
-    pub fn escrowed_total(e: Env) -> i128 {
-        escrow::escrowed_total(&e)
+    /// Total token amount still held across all active escrows for a given token.
+    pub fn escrowed_total(e: Env, token: Address) -> i128 {
+        escrow::escrowed_total(&e, &token)
     }
 
-    /// `(total locked, active count, settled count)` across all escrows.
-    pub fn escrow_stats(e: Env) -> (i128, u32, u32) {
-        escrow::stats(&e)
+    /// `(total locked, active count, settled count)` across all escrows for a given token.
+    pub fn escrow_stats(e: Env, token: Address) -> (i128, u32, u32) {
+        escrow::stats(&e, &token)
     }
 
     /// Reassigns an unsettled escrow to a new beneficiary. Depositor only.
-    pub fn transfer_escrow_beneficiary(e: Env, depositor: Address, escrow_id: u32, new_beneficiary: Address) {
+    pub fn transfer_escrow_beneficiary(
+        e: Env,
+        depositor: Address,
+        escrow_id: u32,
+        new_beneficiary: Address,
+    ) {
         escrow::transfer_beneficiary(&e, &depositor, escrow_id, &new_beneficiary);
     }
 
     /// Creates one escrow per recipient of split `split_id` for its share and
     /// returns the new escrow ids.
-    pub fn split_to_escrow(e: Env, sender: Address, split_id: u64, deadline_ledger: u32) -> Vec<u32> {
+    pub fn split_to_escrow(
+        e: Env,
+        sender: Address,
+        split_id: u64,
+        deadline_ledger: u32,
+    ) -> Vec<u32> {
         crate::splitter::split_to_escrow(&e, &sender, split_id, deadline_ledger)
     }
 
@@ -297,7 +324,7 @@ impl VeriTixPay {
         crate::dispute::resolve_appeal(&e, resolver, escrow_id, winner);
     }
 
-/// Executes one due charge from an authorised recurring payment.
+    /// Executes one due charge from an authorised recurring payment.
     pub fn execute_recurring(e: Env, recurring_id: u64) {
         recurring::execute_recurring(&e, recurring_id);
     }
@@ -342,7 +369,10 @@ impl VeriTixPay {
     /// # Panics
     ///
     /// Panics when no multi-escrow exists at `multi_escrow_id`.
-    pub fn get_multi_escrow(e: Env, multi_escrow_id: u64) -> crate::storage_types::MultiEscrowRecord {
+    pub fn get_multi_escrow(
+        e: Env,
+        multi_escrow_id: u64,
+    ) -> crate::storage_types::MultiEscrowRecord {
         crate::multi_escrow::record(&e, multi_escrow_id)
     }
 
@@ -379,8 +409,8 @@ impl VeriTixPay {
 mod tests {
     use super::*;
     use crate::storage_types::EscrowStatus;
-    use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::testutils::{Address as _, Events as _};
+    use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::{vec, xdr, FromVal, IntoVal};
 
     struct Fixture {
@@ -443,10 +473,10 @@ mod tests {
             (address, token)
         }
 
-        /// The total the contract reports as still held in escrow.
-        fn locked(&self) -> i128 {
+        /// The total the contract reports as still held in escrow for `token`.
+        fn locked(&self, token: &Address) -> i128 {
             self.e
-                .as_contract(&self.contract_id, || escrow::value_locked(&self.e))
+                .as_contract(&self.contract_id, || escrow::value_locked(&self.e, token))
         }
 
         fn escrows_created(&self) -> u32 {
@@ -482,12 +512,12 @@ mod tests {
     #[test]
     fn create_escrow_holds_the_funds_for_the_beneficiary() {
         let f = Fixture::new();
-        let (depositor, beneficiary, _token_address, token, _id) = f.escrow(1_000);
+        let (depositor, beneficiary, token_address, token, _id) = f.escrow(1_000);
 
         assert_eq!(token.balance(&depositor), 0);
         assert_eq!(token.balance(&f.contract), 1_000);
         assert_eq!(token.balance(&beneficiary), 0);
-        assert_eq!(f.locked(), 1_000);
+        assert_eq!(f.locked(&token_address), 1_000);
     }
 
     #[test]
@@ -526,11 +556,11 @@ mod tests {
     #[test]
     fn release_decrements_the_locked_value() {
         let f = Fixture::new();
-        let (_depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+        let (_depositor, _beneficiary, token_address, _token, id) = f.escrow(1_000);
 
         f.client.release_escrow(&Address::generate(&f.e), &id);
 
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
@@ -569,7 +599,7 @@ mod tests {
     #[test]
     fn a_released_escrow_cannot_be_released_again() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
         f.client.release_escrow(&f.admin, &id);
 
         assert!(panics(|| {
@@ -577,7 +607,7 @@ mod tests {
         }));
         // The beneficiary is paid once, not twice.
         assert_eq!(token.balance(&beneficiary), 1_000);
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
@@ -615,14 +645,15 @@ mod tests {
     #[test]
     fn releasing_one_escrow_leaves_the_others_locked() {
         let f = Fixture::new();
-        let (_d1, _b1, _t1, _a1, first) = f.escrow(400);
-        let (_d2, _b2, _t2, _a2, second) = f.escrow(600);
+        let (_d1, _b1, t1, _a1, first) = f.escrow(400);
+        let (_d2, _b2, t2, _a2, second) = f.escrow(600);
 
         f.client.release_escrow(&f.admin, &first);
 
         assert!(f.client.is_escrow_settled(&first));
         assert!(!f.client.is_escrow_settled(&second));
-        assert_eq!(f.locked(), 600);
+        assert_eq!(f.locked(&t1), 0);
+        assert_eq!(f.locked(&t2), 600);
     }
 
     // ---- #884: refund_escrow --------------------------------------------
@@ -631,6 +662,7 @@ mod tests {
     fn refund_pays_the_depositor_everything_held() {
         let f = Fixture::new();
         let (depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         f.client.refund_escrow(&depositor, &id);
 
@@ -642,13 +674,14 @@ mod tests {
     #[test]
     fn refund_marks_the_escrow_refunded_and_settled() {
         let f = Fixture::new();
-        let (depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+        let (depositor, _beneficiary, token_address, _token, id) = f.escrow(1_000);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         f.client.refund_escrow(&depositor, &id);
 
         assert_eq!(f.client.get_escrow(&id).status, EscrowStatus::Refunded);
         assert!(f.client.is_escrow_settled(&id));
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
@@ -659,6 +692,26 @@ mod tests {
         f.client.refund_escrow(&f.admin, &id);
 
         assert_eq!(token.balance(&depositor), 1_000);
+    }
+
+    #[test]
+    fn the_beneficiary_can_refund_before_deadline() {
+        let f = Fixture::new();
+        let (depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+
+        f.client.refund_escrow(&beneficiary, &id);
+
+        assert_eq!(token.balance(&depositor), 1_000);
+    }
+
+    #[test]
+    fn depositor_cannot_refund_before_deadline() {
+        let f = Fixture::new();
+        let (depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+
+        assert!(panics(|| {
+            f.client.refund_escrow(&depositor, &id);
+        }));
     }
 
     #[test]
@@ -678,6 +731,7 @@ mod tests {
     fn a_refunded_escrow_cannot_be_released() {
         let f = Fixture::new();
         let (depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
         f.client.refund_escrow(&depositor, &id);
 
         assert!(panics(|| {
@@ -692,6 +746,7 @@ mod tests {
         let f = Fixture::new();
         let (depositor, _beneficiary, _token_address, token, id) = f.escrow(1_000);
         f.client.release_escrow(&f.admin, &id);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         assert!(panics(|| {
             f.client.refund_escrow(&depositor, &id);
@@ -703,6 +758,7 @@ mod tests {
     fn refund_emits_the_depositor_the_id_and_the_amount() {
         let f = Fixture::new();
         let (depositor, _beneficiary, _token_address, _token, id) = f.escrow(750);
+        f.e.ledger().with_mut(|l| l.sequence = 2_001);
 
         f.client.refund_escrow(&depositor, &id);
 
@@ -748,24 +804,24 @@ mod tests {
     #[test]
     fn a_partial_release_decrements_the_locked_value() {
         let f = Fixture::new();
-        let (_depositor, _beneficiary, _token_address, _token, id) = f.escrow(1_000);
+        let (_depositor, _beneficiary, token_address, _token, id) = f.escrow(1_000);
 
         f.client.release_partial_escrow(&f.admin, &id, &300);
 
-        assert_eq!(f.locked(), 700);
+        assert_eq!(f.locked(&token_address), 700);
     }
 
     #[test]
     fn successive_partial_releases_add_up() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
 
         f.client.release_partial_escrow(&f.admin, &id, &300);
         f.client.release_partial_escrow(&f.admin, &id, &200);
 
         assert_eq!(token.balance(&beneficiary), 500);
         assert_eq!(f.client.get_escrow(&id).amount, 500);
-        assert_eq!(f.locked(), 500);
+        assert_eq!(f.locked(&token_address), 500);
     }
 
     #[test]
@@ -773,7 +829,7 @@ mod tests {
         // "Active until the remainder is zero" — the call that takes it to zero
         // is the one that closes the escrow.
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
 
         f.client.release_partial_escrow(&f.admin, &id, &300);
         f.client.release_partial_escrow(&f.admin, &id, &700);
@@ -783,13 +839,13 @@ mod tests {
         assert_eq!(record.amount, 0);
         assert_eq!(record.status, EscrowStatus::Released);
         assert!(f.client.is_escrow_settled(&id));
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
     }
 
     #[test]
     fn a_partial_release_above_the_remainder_is_refused() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
         f.client.release_partial_escrow(&f.admin, &id, &300);
 
         assert!(panics(|| {
@@ -797,7 +853,7 @@ mod tests {
         }));
         assert_eq!(token.balance(&beneficiary), 300);
         assert_eq!(f.client.get_escrow(&id).amount, 700);
-        assert_eq!(f.locked(), 700);
+        assert_eq!(f.locked(&token_address), 700);
     }
 
     #[test]
@@ -815,14 +871,14 @@ mod tests {
     #[test]
     fn a_negative_partial_release_is_refused() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
 
         assert!(panics(|| {
             f.client.release_partial_escrow(&f.admin, &id, &-100);
         }));
         assert_eq!(token.balance(&beneficiary), 0);
         assert_eq!(f.client.get_escrow(&id).amount, 1_000);
-        assert_eq!(f.locked(), 1_000);
+        assert_eq!(f.locked(&token_address), 1_000);
     }
 
     #[test]
@@ -862,13 +918,13 @@ mod tests {
     #[test]
     fn a_full_release_after_a_partial_pays_the_remainder() {
         let f = Fixture::new();
-        let (_depositor, beneficiary, _token_address, token, id) = f.escrow(1_000);
+        let (_depositor, beneficiary, token_address, token, id) = f.escrow(1_000);
         f.client.release_partial_escrow(&f.admin, &id, &250);
 
         f.client.release_escrow(&f.admin, &id);
 
         assert_eq!(token.balance(&beneficiary), 1_000);
-        assert_eq!(f.locked(), 0);
+        assert_eq!(f.locked(&token_address), 0);
         assert!(f.client.is_escrow_settled(&id));
     }
 
@@ -959,6 +1015,57 @@ mod tests {
         assert_eq!(f.client.get_escrow(&id).amount, 600);
         assert!(!f.client.is_escrow_settled(&id));
     }
+
+    #[test]
+    fn create_escrow_rejects_past_or_current_deadline() {
+        let f = Fixture::new();
+        let depositor = Address::generate(&f.e);
+        let beneficiary = Address::generate(&f.e);
+        let (token_address, _token) = f.asset(&depositor, 1_000);
+        let cur = f.e.ledger().sequence();
+
+        // Boundary: deadline == sequence must fail
+        assert!(panics(|| {
+            f.client
+                .create_escrow(&depositor, &beneficiary, &token_address, &100, &cur);
+        }));
+
+        // Strictly future deadline (cur + 1) succeeds
+        let id = f
+            .client
+            .create_escrow(&depositor, &beneficiary, &token_address, &100, &(cur + 1));
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn escrow_value_locked_tracks_per_token() {
+        let f = Fixture::new();
+        let depositor = Address::generate(&f.e);
+        let beneficiary = Address::generate(&f.e);
+        let (token_a, _t_a) = f.asset(&depositor, 1_000);
+        let (token_b, _t_b) = f.asset(&depositor, 2_000);
+        let cur = f.e.ledger().sequence();
+
+        let id_a = f
+            .client
+            .create_escrow(&depositor, &beneficiary, &token_a, &400, &(cur + 10));
+        let id_b = f
+            .client
+            .create_escrow(&depositor, &beneficiary, &token_b, &700, &(cur + 10));
+
+        assert_eq!(f.client.escrowed_total(&token_a), 400);
+        assert_eq!(f.client.escrowed_total(&token_b), 700);
+
+        f.client.release_escrow(&f.admin, &id_a);
+
+        assert_eq!(f.client.escrowed_total(&token_a), 0);
+        assert_eq!(f.client.escrowed_total(&token_b), 700);
+
+        f.client.release_escrow(&f.admin, &id_b);
+
+        assert_eq!(f.client.escrowed_total(&token_a), 0);
+        assert_eq!(f.client.escrowed_total(&token_b), 0);
+    }
 }
 
 #[cfg(test)]
@@ -983,7 +1090,12 @@ pub mod testing {
             let client = VeriTixPayClient::new(&e, &contract_id);
             let admin = Address::generate(&e);
             client.initialize(&admin);
-            Fixture { e, client, contract_id, admin }
+            Fixture {
+                e,
+                client,
+                contract_id,
+                admin,
+            }
         }
 
         /// A new account holding `amount` tokens.
