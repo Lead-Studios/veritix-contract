@@ -1450,6 +1450,23 @@ pub mod testing {
     ) -> Result<(), SplitterError> {
         Splitter::replace_split_recipient(&env, split_id, old_recipient, new_recipient)
     }
+    /// Adds `amount` tokens to an existing active escrow on behalf of `depositor`.
+    pub fn topup_escrow(
+        env: Env,
+        depositor: Address,
+        escrow_id: u64,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        EscrowModule::topup_escrow(&env, depositor, escrow_id, amount)
+    }
+    /// Adds `amount` tokens to an existing active escrow for `depositor`.
+    pub fn topup_escrow(
+        env: Env,
+        depositor: Address,
+        escrow_id: u64,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        EscrowModule::topup_escrow(&env, depositor, escrow_id, amount)
 
     /// Revokes all active allowances granted by `from`.
     pub fn revoke_all_allowances(env: Env, from: Address) {
