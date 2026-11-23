@@ -208,3 +208,104 @@ pub enum SplitterDataKey {
     Split(u64),
     SenderSplits(Address),
 }
+if recipients.is_empty() {
+            return Err(SplitterError::InvalidSplitConfig);
+        }
+
+        let mut total_bps: u32 = 0;
+        for entry in recipients.iter() {
+            if entry.bps == 0 {
+                return Err(SplitterError::InvalidSplitConfig);
+            }
+            total_bps = total_bps.saturating_add(entry.bps);
+        }
+
+        if total_bps != TOTAL_BPS {
+            // Includes the actual sum so callers/logs immediately see what was provided
+            panic!("split shares must total 10000 bps, got {}", total_bps);
+        }
+
+        pub const TOTAL_BPS: u32 = 10_000;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitShare {
+    pub recipient: Address,
+    pub bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitRecord {
+    pub id: u64,
+    pub sender: Address,
+    pub token: Address,
+    pub total_amount: i128,
+    pub shares: Vec<SplitShare>,
+}
+pub fn create_split(
+        env: &Env,
+        sender: Address,
+        token: Address,
+        total_amount: i128,
+        recipients: Vec<Address>,
+        shares_bps: Vec<u32>,
+    ) -> Result<u64, SplitterError> {
+        sender.require_auth();
+
+        if recipients.is_empty()
+            || shares_bps.is_empty()
+            || recipients.len() != shares_bps.len()
+        {
+            return Err(SplitterError::InvalidSplitConfig);
+        }
+
+        if total_amount <= 0 {
+            return Err(SplitterError::InvalidAmount);
+        }
+
+        let mut total_bps: u32 = 0;
+        let mut shares: Vec<SplitShare> = Vec::new(env);
+
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).unwrap();
+            let bps = shares_bps.get(i).unwrap();
+
+            if bps == 0 {
+                return Err(SplitterError::InvalidSplitConfig);
+            }
+
+            total_bps = total_bps.saturating_add(bps);
+            shares.push_back(SplitShare { recipient, bps });
+        }
+
+        if total_bps != TOTAL_BPS {
+            panic!("split shares must total 10000 bps, got {}", total_bps);
+        }
+
+        let next_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&SplitterDataKey::NextSplitId)
+            .unwrap_or(1)
+            + 1;
+        let split_id = next_id - 1;
+
+        let record = SplitRecord {
+            id: split_id,
+            sender,
+            token,
+            total_amount,
+            shares,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&SplitterDataKey::NextSplitId, &next_id);
+        env.storage()
+            .persistent()
+            .set(&SplitterDataKey::Split(split_id), &record);
+
+        Ok(split_id)
+    }
+    

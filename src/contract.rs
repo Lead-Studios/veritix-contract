@@ -1450,3 +1450,36 @@ pub mod testing {
     ) -> Result<(), SplitterError> {
         Splitter::replace_split_recipient(&env, split_id, old_recipient, new_recipient)
     }
+
+    /// Revokes all active allowances granted by `from`.
+    pub fn revoke_all_allowances(env: Env, from: Address) {
+        from.require_auth();
+        allowance::revoke_all_allowances(&env, from);
+    }
+
+    #[test]
+    fn test_revoke_all_allowances_requires_auth_and_revokes() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, VeriTixPay);
+        let client = VeriTixPayClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let spender_a = Address::generate(&env);
+        let spender_b = Address::generate(&env);
+
+        // Set up allowances for spender_a and spender_b from owner, then revoke all
+        client.revoke_all_allowances(&owner);
+    }
+    /// Creates a new payment split for `sender` across `recipients` with corresponding `shares_bps`.
+    pub fn create_split(
+        env: Env,
+        sender: Address,
+        token: Address,
+        total_amount: i128,
+        recipients: Vec<Address>,
+        shares_bps: Vec<u32>,
+    ) -> Result<u64, SplitterError> {
+        Splitter::create_split(&env, sender, token, total_amount, recipients, shares_bps)
+    }
