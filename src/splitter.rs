@@ -208,3 +208,58 @@ pub enum SplitterDataKey {
     Split(u64),
     SenderSplits(Address),
 }
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitRecord {
+    pub id: u64,
+    pub sender: Address,
+    pub token: Address,
+    pub total_amount: i128,
+    pub shares: Vec<SplitShare>,
+    pub distributed: bool,
+}
+
+/// Distributes a split's funds across recipients using `total_amount * share_bps / 10_000`.
+    ///
+    /// Rounding remainder (integer division dust where `sum(payouts) < total_amount`)
+    /// remains in the contract rather than exceeding `total_amount`. Marks the split
+    /// as distributed and rejects any subsequent distribution attempt.
+    pub fn distribute_split(
+        env: &Env,
+        caller: Address,
+        split_id: u64,
+    ) -> Result<i128, SplitterError> {
+        caller.require_auth();
+
+        let mut record: SplitRecord = env
+            .storage()
+            .persistent()
+            .get(&SplitterDataKey::Split(split_id))
+            .ok_or(SplitterError::SplitNotFound)?;
+
+        if record.distributed {
+            return Err(SplitterError::AlreadyDistributed);
+        }
+
+        // Mark distributed before external token transfers (checks-effects-interactions)
+        record.distributed = true;
+        env.storage()
+            .persistent()
+            .set(&SplitterDataKey::Split(split_id), &record);
+
+        let token_client = soroban_sdk::token::Client::new(env, &record.token);
+        let contract_address = env.current_contract_address();
+        let mut total_distributed: i128 = 0;
+
+        for share in record.shares.iter() {
+            let payout = (record.total_amount * (share.bps as i128)) / (TOTAL_BPS as i128);
+            if payout > 0 {
+                token_client.transfer(&contract_address, &share.recipient, &payout);
+                total_distributed = total_distributed.saturating_add(payout);
+            }
+        }
+
+        // Any rounding remainder (`record.total_amount - total_distributed`) stays in the contract.
+        Ok(total_distributed)
+    }
