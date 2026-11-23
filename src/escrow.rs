@@ -639,3 +639,55 @@ pub fn transfer_beneficiary(e: &Env, depositor: &Address, id: u32, new_beneficia
 
         Ok(())
     }
+    /// Adds additional token funds to an active escrow on behalf of `depositor`.
+    ///
+    /// Requires `depositor` authorization, a positive `amount`, and an `Active`
+    /// escrow, then transfers tokens into the contract and updates both the escrow
+    /// record and the tracked locked balance.
+    pub fn topup_escrow(
+        env: &Env,
+        depositor: Address,
+        escrow_id: u64,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        depositor.require_auth();
+
+        if amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+
+        let mut escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&EscrowDataKey::Escrow(escrow_id))
+            .ok_or(EscrowError::EscrowNotFound)?;
+
+        if escrow.status != EscrowStatus::Active {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        if escrow.depositor != depositor {
+            return Err(EscrowError::Unauthorized);
+        }
+
+        let token_client = soroban_sdk::token::Client::new(env, &escrow.token);
+        token_client.transfer(&depositor, &env.current_contract_address(), &amount);
+
+        escrow.amount = escrow
+            .amount
+            .checked_add(amount)
+            .ok_or(EscrowError::Overflow)?;
+
+        env.storage()
+            .persistent()
+            .set(&EscrowDataKey::Escrow(escrow_id), &escrow);
+
+        let locked_key = EscrowDataKey::LockedAmount(escrow.token.clone());
+        let current_locked: i128 = env.storage().instance().get(&locked_key).unwrap_or(0);
+        let updated_locked = current_locked
+            .checked_add(amount)
+            .ok_or(EscrowError::Overflow)?;
+        env.storage().instance().set(&locked_key, &updated_locked);
+
+        Ok(())
+    }
