@@ -1459,3 +1459,12 @@ pub mod testing {
     ) -> Result<(), EscrowError> {
         EscrowModule::topup_escrow(&env, depositor, escrow_id, amount)
     }
+    /// Adds `amount` tokens to an existing active escrow for `depositor`.
+    pub fn topup_escrow(
+        env: Env,
+        depositor: Address,
+        escrow_id: u64,
+        amount: i128,
+    ) -> Result<(), EscrowError> {
+        EscrowModule::topup_escrow(&env, depositor, escrow_id, amount)
+    }
